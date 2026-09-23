@@ -28,13 +28,13 @@ const INTRO = 3.4;
 const lerpAngle = (a, b, t) => a + wrap(b - a) * t;
 
 export class Game {
-  constructor(area, emit) {
+  constructor(area, emit, opts = {}) {
     this.area = area;
     this.emit = emit;
     this.g = new Graph(area);
-    this.world = buildWorld(area, this.g);
+    this.world = buildWorld(area, this.g, opts);
     this.scene = this.world.scene;
-    this.camera = new THREE.PerspectiveCamera(62, 1, 0.5, 1200);
+    this.camera = new THREE.PerspectiveCamera(62, 1, 0.5, 2600);
     this.time = 0;
     this.attract = true;
 
@@ -47,6 +47,19 @@ export class Game {
       c.view.group.add(c.bubble.sprite);
     });
     this.sparks = new Sparks(this.scene);
+    // arrows painted on the road showing which way you'll go at the next junction
+    const arrow = new THREE.Shape();
+    [[0, 1.2], [1.2, -0.1], [0.6, -0.1], [0, 0.5], [-0.6, -0.1], [-1.2, -0.1]].forEach(([x, y], i) => (i ? arrow.lineTo(x, y) : arrow.moveTo(x, y)));
+    const arrowGeo = new THREE.ShapeGeometry(arrow);
+    arrowGeo.scale(1.7, 1.7, 1);
+    arrowGeo.rotateX(-Math.PI / 2);
+    this.chevrons = [0, 1, 2].map(() => {
+      const m = new THREE.Mesh(arrowGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, depthWrite: false }));
+      m.renderOrder = 5;
+      m.visible = false;
+      this.scene.add(m);
+      return m;
+    });
     this.siren = new THREE.PointLight(0x3d7bff, 0, 30, 1.5);
     this.scene.add(this.siren);
     this.shake = 0;
@@ -187,6 +200,7 @@ export class Game {
     const pose = this.g.pose(this.p);
     this.camH = pose.h;
     this.readyT = 2.2;
+    this.seedTrail();
   }
 
   begin() {
@@ -225,6 +239,7 @@ export class Game {
     P.s = this.g.edges[P.edge].len - P.s;
     P.buf = null;
     P.last = null;
+    this.seedTrail();
   }
 
   jump() {
@@ -681,8 +696,68 @@ export class Game {
       this.sparks.burst(pp.x + (Math.random() - 0.5) * 16, 7, pp.z + (Math.random() - 0.5) * 16, 5, FIBRE_CYCLE, { up: 2, spread: 3, life: 1.8 });
     }
     this.sparks.update(dt);
+    this.syncChevrons(t);
+    this.world.update(t, pp);
     this.syncCamera(dt, t, pp);
     if (this.state === 'play') updateSiren(this.nearestCop ?? Infinity, t);
+  }
+
+  syncChevrons(t) {
+    const g = this.g, P = this.p;
+    const hide = () => this.chevrons.forEach((c) => { c.visible = false; });
+    if (this.state !== 'play' && this.state !== 'ready') return hide();
+    const e = g.edges[P.edge];
+    if (e.len - P.s > 60) return hide();
+    const node = g.endNode(P);
+    const opts = g.options(node, P, g.arriveHeading(P));
+    if (opts.length < 2) return hide();
+    let pick = P.buf ? g.choose(opts, P.buf) : null;
+    const turning = !!pick;
+    if (!pick) pick = g.choose(opts, null);
+    const pe = g.edges[pick.edge];
+    this.chevrons.forEach((c, i) => {
+      const di = 3.5 + i * 4.2;
+      if (di > pe.len - 1) { c.visible = false; return; }
+      const pt = g.pointAt(pe, pick.dir === 1 ? di : pe.len - di);
+      const h = pick.dir === 1 ? pt.h : pt.h + Math.PI;
+      c.position.set(pt.x, 0.12, pt.z);
+      c.rotation.y = -h;
+      c.material.color.set(turning ? 0xf6c521 : 0xffffff);
+      c.material.opacity = (turning ? 0.55 : 0.28) + 0.4 * Math.max(0, Math.sin(t * 7 - i * 1.2));
+      c.visible = true;
+    });
+  }
+
+  seedTrail() {
+    const g = this.g, P = this.p;
+    this.trail = [];
+    for (let d = Math.min(P.s, 16); d > 0.4; d -= 0.8) {
+      const q = g.pose({ edge: P.edge, dir: P.dir, s: P.s - d });
+      this.trail.push({ x: q.x, z: q.z });
+    }
+  }
+
+  addTrail(pp) {
+    const tr = this.trail || (this.trail = []);
+    const last = tr[tr.length - 1];
+    if (!last || Math.hypot(pp.x - last.x, pp.z - last.z) > 0.6) {
+      tr.push({ x: pp.x, z: pp.z });
+      if (tr.length > 120) tr.shift();
+    }
+  }
+
+  // a point dist metres back along the trail
+  behind(pp, dist) {
+    const tr = this.trail;
+    let px = pp.x, pz = pp.z, left = dist;
+    for (let i = tr.length - 1; i >= 0; i--) {
+      const q = tr[i];
+      const d = Math.hypot(q.x - px, q.z - pz);
+      if (d >= left && d > 0) return { x: px + ((q.x - px) * left) / d, z: pz + ((q.z - pz) * left) / d };
+      left -= d;
+      px = q.x; pz = q.z;
+    }
+    return { x: px - Math.sin(pp.h) * left, z: pz + Math.cos(pp.h) * left };
   }
 
   syncCamera(dt, t, pp) {
@@ -695,7 +770,10 @@ export class Game {
     }
     this.camH = lerpAngle(this.camH, pp.h, 1 - Math.exp(-dt * 4.5));
     const fx = Math.sin(this.camH), fz = -Math.cos(this.camH);
-    const want = new THREE.Vector3(pp.x - fx * 9.5, 5.2, pp.z - fz * 9.5);
+    // the camera rides the runner's own path, so it stays in the street round corners
+    this.addTrail(pp);
+    const back = this.behind(pp, 9.5);
+    const want = new THREE.Vector3(back.x, 5.2, back.z);
     const look = new THREE.Vector3(pp.x + fx * 8, 2.2, pp.z + fz * 8);
     if (this.state === 'ready' && this.intro) {
       // swoop down from above the whole area onto the runner
@@ -706,7 +784,7 @@ export class Game {
       cam.position.lerpVectors(high, want, e);
       cam.lookAt(new THREE.Vector3(pp.x * 0.6, 0, pp.z * 0.6).lerp(look, e));
     } else {
-      cam.position.lerp(want, 1 - Math.exp(-dt * (this.state === 'ready' ? 2.5 : 8)));
+      cam.position.lerp(want, 1 - Math.exp(-dt * (this.state === 'ready' ? 2.5 : 10)));
       cam.lookAt(look);
       cam.rotateZ(-wrap(pp.h - this.camH) * 0.35);
     }

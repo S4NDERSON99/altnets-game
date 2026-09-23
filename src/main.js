@@ -21,7 +21,9 @@ const canvas = $('scene');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: !coarse, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, coarse ? 1.5 : 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 1.1;
+renderer.shadowMap.enabled = !coarse;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 let composer = null;
 let bloom = null;
 
@@ -30,7 +32,9 @@ let area = null;
 let paused = false;
 
 function setupComposer() {
-  composer = new EffectComposer(renderer);
+  // multisampled target keeps edges smooth through the bloom pass
+  const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+  composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: coarse ? 2 : 4 }));
   composer.addPass(new RenderPass(game.scene, game.camera));
   bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.55, 0.45, 0.82);
   composer.addPass(bloom);
@@ -64,7 +68,7 @@ function disposeScene(scene) {
 function mountGame(a) {
   if (game) disposeScene(game.scene);
   area = a;
-  game = new Game(a, onGameEvent);
+  game = new Game(a, onGameEvent, { shadows: !coarse });
   try { JSON.parse(store.get('altnets-hints') || '[]').forEach((k) => game.hints.add(k)); } catch { /* ignore */ }
   setupComposer();
 }

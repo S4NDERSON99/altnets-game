@@ -42,12 +42,37 @@ export function makeCopper(tint) {
   const body = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 1.0, 1.9, 20), bodyMat);
   body.position.y = 0.95;
   g.add(body);
-  for (let i = 0; i < 4; i++) {
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.93 - i * 0.03, 0.09, 8, 24), coilMat);
+  for (let i = 0; i < 2; i++) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.97 - i * 0.03, 0.09, 8, 24), coilMat);
     ring.rotation.x = Math.PI / 2;
-    ring.position.y = 0.35 + i * 0.42;
+    ring.position.y = 0.3 + i * 0.36;
     g.add(ring);
   }
+  // hi-vis police jacket with reflective bands and a blue and white chequer
+  const hivisMat = mat(0xd4ef1f, { roughness: 0.6, emissive: new THREE.Color(0x3a4a00) });
+  const vest = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.96, 1.05, 20), hivisMat);
+  vest.position.y = 1.38;
+  g.add(vest);
+  for (const y of [1.12, 1.62]) {
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.915 + (y > 1.4 ? -0.015 : 0.01), 0.925 + (y > 1.4 ? -0.01 : 0.02), 0.12, 20), mat(0xe8eef0, { metalness: 0.9, roughness: 0.15, emissive: new THREE.Color(0x333a3c) }));
+    band.position.y = y;
+    g.add(band);
+  }
+  const chequer = new THREE.CanvasTexture((() => {
+    const c = document.createElement('canvas'); c.width = 64; c.height = 16;
+    const x = c.getContext('2d');
+    for (let i = 0; i < 8; i++) for (let j = 0; j < 2; j++) { x.fillStyle = (i + j) % 2 ? '#ffffff' : '#1d3fae'; x.fillRect(i * 8, j * 8, 8, 8); }
+    return c;
+  })());
+  chequer.colorSpace = THREE.SRGBColorSpace;
+  chequer.wrapS = THREE.RepeatWrapping;
+  chequer.repeat.set(3, 1);
+  const cheq = new THREE.Mesh(new THREE.CylinderGeometry(0.73, 0.73, 0.16, 24, 1, true), new THREE.MeshStandardMaterial({ map: chequer, roughness: 0.5 }));
+  cheq.position.y = 2.5;
+  g.add(cheq);
+  const radio = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.34, 0.12), mat(0x111111));
+  radio.position.set(0.45, 1.65, -0.82);
+  g.add(radio);
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.82, 20, 14), bodyMat);
   head.position.y = 2.05;
   g.add(head);
@@ -91,15 +116,36 @@ export function makeCopper(tint) {
         bodyMat.color.set(white ? 0xe6eeee : frightBody);
         bodyMat.emissive.set(0x000000);
         navy.color.set(white ? 0xffffff : 0x4a5557);
+        hivisMat.color.set(white ? 0xffffff : 0x9aa6a8);
+        hivisMat.emissive.set(0x000000);
         lamp.material.color.set(0x666666);
       } else {
         bodyMat.color.copy(baseBody);
         bodyMat.emissive.copy(baseBody).multiplyScalar(0.12);
         navy.color.set(0x18214a);
+        hivisMat.color.set(0xd4ef1f);
+        hivisMat.emissive.set(0x3a4a00);
         lamp.material.color.set(Math.floor(t * 4) % 2 ? 0x3d8bff : 0x0b1f55);
       }
     },
   };
+}
+
+// a tall soft beam so power-ups can be spotted from streets away
+function beacon(colour) {
+  const g = new THREE.CylinderGeometry(0.9, 1.6, 40, 16, 1, true);
+  g.translate(0, 20, 0);
+  const c = document.createElement('canvas');
+  c.width = 4; c.height = 64;
+  const x = c.getContext('2d');
+  const grd = x.createLinearGradient(0, 0, 0, 64);
+  grd.addColorStop(0, 'rgba(255,255,255,0)');
+  grd.addColorStop(1, 'rgba(255,255,255,0.9)');
+  x.fillStyle = grd;
+  x.fillRect(0, 0, 4, 64);
+  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), color: colour, transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false }));
+  m.renderOrder = 4;
+  return m;
 }
 
 export function makeSwitchOff() {
@@ -112,6 +158,7 @@ export function makeSwitchOff() {
   inner.add(ring, bar);
   inner.position.y = 2.2;
   g.add(inner);
+  g.add(beacon(COLOURS.yellow));
   const glow = new THREE.PointLight(COLOURS.yellow, 18, 12, 1.8);
   glow.position.y = 2;
   g.add(glow);
@@ -128,6 +175,7 @@ export function makeGigabit() {
   inner.add(bolt);
   inner.position.y = 2.2;
   g.add(inner);
+  g.add(beacon(COLOURS.pink));
   const glow = new THREE.PointLight(COLOURS.pink, 16, 12, 1.8);
   glow.position.y = 2;
   g.add(glow);

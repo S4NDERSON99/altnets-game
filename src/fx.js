@@ -75,8 +75,8 @@ export function makeBubble() {
   c.width = 512; c.height = 160;
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, fog: false }));
-  sprite.scale.set(6, 1.875, 1);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color: 0xcfcfcf, transparent: true, depthTest: false, fog: false }));
+  sprite.scale.set(4.8, 1.5, 1);
   sprite.center.set(0.5, 0);
   sprite.position.y = 4.4;
   sprite.visible = false;

@@ -25,6 +25,7 @@ function areaApi() {
 
 export default defineConfig({
   plugins: [areaApi()],
-  server: { port: 5190, host: true },
+  // .data holds ~257k map tiles; watching them would grind the dev server
+  server: { port: 5190, host: true, watch: { ignored: ['**/.data/**', '**/.cache/**'] } },
   preview: { port: 5190, host: true },
 });

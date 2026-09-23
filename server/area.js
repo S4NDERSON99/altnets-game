@@ -1,11 +1,13 @@
 // Turns a UK postcode into a playable street map.
-// postcodes.io gives the location, OpenStreetMap (Overpass) gives the roads,
-// buildings and police stations. The result is a small road graph in metres,
+// postcodes.io gives the location; OpenStreetMap gives the roads, buildings
+// and police stations, from our own tiles (server/tiles.js) or Overpass. The result is a small road graph in metres,
 // cached on disk per postcode so each area is fetched once.
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { tilesReady, elementsAround } from './tiles.js';
 
-const CACHE_DIR = path.resolve('.cache/areas');
+const CACHE_DIR = fileURLToPath(new URL('../.cache/areas', import.meta.url));
 const UA = 'altnets-game/0.1 (+https://thealtnets.com)';
 // Raced in parallel, first good JSON wins. Checked 23 Sep 2026: the bare
 // overpass-api.de name mostly answers 504 "too busy" (it fronts lz4 and z, so
@@ -309,7 +311,7 @@ function pickStation(elements, proj) {
   const all = elements.filter((e) => e.tags?.amenity === 'police' && (e.lat ?? e.center?.lat) != null).map((e) => {
     const lat = e.lat ?? e.center?.lat, lon = e.lon ?? e.center?.lon;
     const p = proj(lat, lon);
-    return { name: e.tags.name || 'Police station', x: r1(p[0]), z: r1(p[1]), dist: Math.round(Math.hypot(p[0], p[1])), score: /police station/i.test(e.tags.name || '') ? 0 : /police/i.test(e.tags.name || '') ? 1 : 2 };
+    return { name: e.tags.name || '', x: r1(p[0]), z: r1(p[1]), dist: Math.round(Math.hypot(p[0], p[1])), score: /police station/i.test(e.tags.name || '') ? 0 : /police/i.test(e.tags.name || '') ? 1 : 2 };
   });
   all.sort((a, b) => a.score - b.score || a.dist - b.dist);
   const s = all[0];
@@ -352,7 +354,10 @@ export async function buildArea(postcodeRaw) {
     let res;
     const tq = Date.now();
     try {
-      res = await overpass(wideR ? areaQuery(loc.lat, loc.lon, NEAR_R, wideR) : areaQuery(loc.lat, loc.lon, WIDE_R));
+      // our own tiles when present, the public Overpass servers otherwise
+      res = (await tilesReady())
+        ? { elements: await elementsAround(loc.lat, loc.lon, wideR ? NEAR_R : WIDE_R, wideR, SPARSE_LEN), host: 'tiles' }
+        : await overpass(wideR ? areaQuery(loc.lat, loc.lon, NEAR_R, wideR) : areaQuery(loc.lat, loc.lon, WIDE_R));
     } catch (err) {
       if (!wideR && edges.length >= 4) break; // the wide retry failed, keep the smaller map
       throw err;

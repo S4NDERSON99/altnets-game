@@ -1,6 +1,8 @@
 // Characters and props: the Altnet runner, the coppers, power-ups, hurdles
 // and the blue lamp outside the police station.
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { COLOURS } from './world.js';
 
 const loader = new THREE.TextureLoader();
@@ -19,10 +21,107 @@ export function makeRunner() {
   shadow.rotation.x = -Math.PI / 2;
   shadow.position.y = 0.15;
   group.add(shadow);
-  const light = new THREE.PointLight(COLOURS.fibre, 10, 14, 1.8);
-  light.position.y = 3;
+  const light = new THREE.PointLight(COLOURS.fibre, 6, 12, 1.8);
+  light.position.set(0, 0.8, 0); // low, so it lights the road and not the top of the head
   group.add(light);
-  return { group, sprite, shadow, mat, height: H };
+  const runner = { group, sprite, shadow, mat, height: H, model: null, body: null, mixer: null, actions: {} };
+  loadModel(runner);
+  return runner;
+}
+
+// The 3D mascot replaces the flat cut-out once it has loaded. If the file is
+// missing or broken, the cut-out stays.
+// Run cycle done in the vertex shader: legs swing from the hips, the cable
+// hair trails and sways, all worked out from the model's own proportions
+// (0 = soles of the trainers, 1 = tips of the cables; the model faces +x).
+function animateMaterial(mesh, uniforms) {
+  mesh.geometry.computeBoundingBox();
+  const b = mesh.geometry.boundingBox;
+  uniforms.uB = { value: new THREE.Vector4(b.min.y, b.max.y - b.min.y, (b.min.z + b.max.z) / 2, (b.max.z - b.min.z) / 2) };
+  uniforms.uCx = { value: (b.min.x + b.max.x) / 2 };
+  mesh.material.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, uniforms);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform vec4 uB; uniform float uCx; uniform float uPhase; uniform float uRun; uniform float uTime; uniform vec2 uSway;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        float f = (transformed.y - uB.x) / uB.y;
+        float H = uB.y;
+        float legW = 1.0 - smoothstep(0.16, 0.26, f);
+        float side = clamp((transformed.z - uB.z) / (uB.w * 0.18), -1.0, 1.0);
+        float a = sin(uPhase) * 0.6 * uRun * side * legW;
+        float py = uB.x + 0.25 * H;
+        float dx = transformed.x - uCx, dy = transformed.y - py;
+        transformed.x = uCx + dx * cos(a) - dy * sin(a);
+        transformed.y = py + dx * sin(a) + dy * cos(a) + max(0.0, sin(uPhase) * side) * 0.045 * H * uRun * legW;
+        float h = clamp((f - 0.7) / 0.3, 0.0, 1.0);
+        float hh = h * h;
+        transformed.x -= hh * H * (0.11 * uRun + 0.018 * sin(uTime * 11.0 + f * 14.0));
+        transformed.z += hh * H * (uSway.x * 0.3 + 0.025 * sin(uTime * 8.0 + transformed.x * 30.0));
+        transformed.y += hh * H * 0.025 * sin(uPhase * 2.0) * uRun;`);
+  };
+  mesh.material.needsUpdate = true;
+}
+
+// The generated model lost the lettering on the hoodie back, which is the side
+// the chase camera sees. Stick it back on: find the back surface with a ray.
+function addHoodieBack(mesh) {
+  const b = mesh.geometry.boundingBox;
+  const H = b.max.y - b.min.y, W = b.max.z - b.min.z;
+  const cz = (b.min.z + b.max.z) / 2;
+  const y = b.min.y + H * 0.42;
+  const ray = new THREE.Raycaster(new THREE.Vector3(b.min.x - H, y, cz), new THREE.Vector3(1, 0, 0));
+  const hit = ray.intersectObject(new THREE.Mesh(mesh.geometry), false)[0];
+  const x = hit ? hit.point.x : b.min.x;
+  const tex = loader.load('/models/hoodie-back.png');
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const w = W * 0.62;
+  const decal = new THREE.Mesh(new THREE.PlaneGeometry(w, w * (328 / 472)), new THREE.MeshStandardMaterial({ map: tex, transparent: true, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -4 }));
+  decal.position.set(x - H * 0.006, y, cz);
+  decal.rotation.y = -Math.PI / 2; // face out of the back (-x)
+  mesh.add(decal);
+}
+
+function loadModel(runner) {
+  const loader = new GLTFLoader();
+  loader.setMeshoptDecoder(MeshoptDecoder);
+  loader.load('/models/altnet.glb', (gltf) => {
+    const model = gltf.scene;
+    const box = new THREE.Box3().setFromObject(model);
+    const size = box.getSize(new THREE.Vector3());
+    const s = (runner.height * 0.92) / size.y;
+    model.scale.setScalar(s);
+    const c = box.getCenter(new THREE.Vector3());
+    model.position.set(-c.x * s, -box.min.y * s, -c.z * s);
+    runner.uniforms = { uPhase: { value: 0 }, uRun: { value: 0 }, uTime: { value: 0 }, uSway: { value: new THREE.Vector2() } };
+    let mainMesh = null;
+    model.traverse((o) => {
+      if (!o.isMesh) return;
+      o.castShadow = true;
+      mainMesh = mainMesh || o;
+      o.frustumCulled = false; // the shader moves vertices outside the static bounds
+      if (o.material) {
+        o.material.metalness = 0; // the fur and hoodie read better fully rough at night
+        o.material.roughness = 0.9;
+        animateMaterial(o, runner.uniforms);
+      }
+    });
+    if (mainMesh) addHoodieBack(mainMesh);
+    const body = new THREE.Group(); // squash, lean and bob happen here
+    body.add(model);
+    const holder = new THREE.Group(); // turns to face the direction of travel
+    holder.add(body);
+    runner.group.add(holder);
+    runner.model = holder;
+    runner.body = body;
+    runner.sprite.visible = false;
+    if (gltf.animations.length) {
+      runner.mixer = new THREE.AnimationMixer(model);
+      gltf.animations.forEach((clip) => { runner.actions[clip.name.toLowerCase()] = runner.mixer.clipAction(clip); });
+      const run = Object.entries(runner.actions).find(([k]) => k.includes('run'))?.[1] || Object.values(runner.actions)[0];
+      run.play();
+      runner.run = run;
+    }
+  }, undefined, () => { /* keep the cut-out */ });
 }
 
 function mat(color, extra = {}) {

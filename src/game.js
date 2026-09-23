@@ -647,6 +647,34 @@ export class Game {
     if (this.state === 'dying') { rot = t * 14; scale = Math.max(0.05, this.dyingT / 1.8); }
     R.mat.rotation = rot;
     R.sprite.scale.set(R.height * (168 / 327) * scale, R.height * scale, 1);
+    if (R.model) {
+      // face the way we're running, lean into turns, squash on landing
+      this.faceH = this.faceH == null ? pp.h : lerpAngle(this.faceH, pp.h, 1 - Math.exp(-dt * 12));
+      const turn = wrap(pp.h - this.faceH);
+      R.model.rotation.y = Math.PI / 2 - this.faceH;
+      const b = R.body;
+      const stride = running ? Math.sin(t * 15) : 0;
+      b.position.y = lift * 3.4 + (running && !R.mixer ? Math.abs(stride) * 0.3 : 0);
+      b.rotation.x = running ? 0.14 : 0;
+      b.rotation.z = -turn * 1.4 + (running && !R.mixer ? stride * 0.08 : 0);
+      if (P.stumble > 0) b.rotation.z += Math.sin(t * 40) * 0.25;
+      let sy = 1 + (running && !R.mixer ? Math.abs(stride) * 0.05 : 0);
+      if (P.air > 0) sy = 1 + lift * 0.12;
+      if (this.state === 'dying') { R.model.rotation.y += t * 14; sy = scale; }
+      b.scale.set(this.state === 'dying' ? scale : 1 / Math.sqrt(sy), sy, this.state === 'dying' ? scale : 1 / Math.sqrt(sy));
+      if (R.uniforms) {
+        const u = R.uniforms;
+        const want = running && P.air <= 0 ? 1 : 0;
+        u.uRun.value += (want - u.uRun.value) * (1 - Math.exp(-dt * 10));
+        u.uPhase.value += dt * (P.boost > 0 ? 21 : P.stumble > 0 ? 8 : 15) * (running ? 1 : 0);
+        u.uTime.value = t;
+        u.uSway.value.set(Math.max(-1, Math.min(1, turn * 3)), 0);
+      }
+      if (R.mixer) {
+        if (R.run) R.run.timeScale = running ? (P.boost > 0 ? 1.5 : P.stumble > 0 ? 0.5 : 1.1) : 0.001;
+        R.mixer.update(dt);
+      }
+    }
     R.mat.color.setScalar(P.boost > 0 && Math.floor(t * 12) % 2 ? 1.6 : 1);
 
     this.cops.forEach((c, i) => {

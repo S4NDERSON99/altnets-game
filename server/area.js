@@ -7,7 +7,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tilesReady, elementsAround } from './tiles.js';
 
-const CACHE_DIR = fileURLToPath(new URL('../.cache/areas', import.meta.url));
+// On Vercel the filesystem is read-only except /tmp, so the area cache moves there.
+const CACHE_DIR = process.env.VERCEL ? '/tmp/altnets-areas' : fileURLToPath(new URL('../.cache/areas', import.meta.url));
 const UA = 'altnets-game/0.1 (+https://thealtnets.com)';
 // Raced in parallel, first good JSON wins. Checked 23 Sep 2026: the bare
 // overpass-api.de name mostly answers 504 "too busy" (it fronts lz4 and z, so
@@ -408,7 +409,9 @@ export async function getArea(postcodeRaw) {
     return JSON.parse(await fs.readFile(file, 'utf8'));
   } catch { /* not cached yet */ }
   const area = await buildArea(pc);
-  await fs.mkdir(CACHE_DIR, { recursive: true });
-  await fs.writeFile(file, JSON.stringify(area));
+  try {
+    await fs.mkdir(CACHE_DIR, { recursive: true });
+    await fs.writeFile(file, JSON.stringify(area));
+  } catch { /* read-only filesystem, e.g. a cold Vercel function: caching is a bonus, not a requirement */ }
   return area;
 }

@@ -7,12 +7,14 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "bake": "node server/bake.js"
+    "bake": "node server/bake.js",
+    "upload-tiles": "node tools/upload_tiles.mjs"
   },
   "dependencies": {
     "three": "^0.169.0"
   },
   "devDependencies": {
+    "@aws-sdk/client-s3": "^3.687.0",
     "vite": "^5.4.21"
   }
 }

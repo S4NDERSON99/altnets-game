@@ -4,8 +4,8 @@ import * as THREE from 'three';
 import { Graph, advance, wrap } from './graph.js';
 import { buildWorld, roadWidth, COLOURS } from './world.js';
 import { makeRunner, makeCopper, makeSwitchOff, makeGigabit, makeHurdle, makeBlueLamp } from './actors.js';
-import { sfx, updateSiren } from './audio.js';
-import { Sparks, makeBubble, TAUNTS } from './fx.js';
+import { sfx, updateSiren, speak } from './audio.js';
+import { Sparks, makeBubble, TAUNTS, SCARED } from './fx.js';
 
 export const COPS = [
   { name: 'Sgt Dial-Up', kind: 'chase', tint: 0xd2753a, wait: 1.2 },
@@ -22,7 +22,6 @@ const FIBRE_CYCLE = [COLOURS.fibre, COLOURS.pink, COLOURS.yellow, COLOURS.orange
 
 const SPARK = [new THREE.Color(0x1ecbc4), new THREE.Color(0xc8fffb)];
 const BURST = [new THREE.Color(0xc8703c), new THREE.Color(0xf6c521), new THREE.Color(0xffffff)];
-const SCARED = ['Eek!', 'Not the switch-off!', 'Leg it!', 'Mummy!'];
 const INTRO = 3.4;
 
 const lerpAngle = (a, b, t) => a + wrap(b - a) * t;
@@ -384,8 +383,11 @@ export class Game {
       if (c.sayT > 0) { c.sayT -= dt; if (c.sayT <= 0) c.bubble.hide(); }
       if (c.mode === 'active') {
         const cp = this.g.pose(c.m);
-        if (Math.hypot(cp.x - pp.x, cp.z - pp.z) < 26 && (c.nextTaunt -= dt) <= 0) {
-          c.bubble.say(TAUNTS[Math.floor(Math.random() * TAUNTS.length)]);
+        const d = Math.hypot(cp.x - pp.x, cp.z - pp.z);
+        if (d < 26 && (c.nextTaunt -= dt) <= 0) {
+          const line = TAUNTS[Math.floor(Math.random() * TAUNTS.length)];
+          c.bubble.say(line.text);
+          speak(line.voice, d);
           c.sayT = 1.6;
           c.nextTaunt = 4 + Math.random() * 5;
         }
@@ -477,8 +479,10 @@ export class Game {
       if (c.mode === 'active') {
         this.reverse(c.m);
         c.mode = 'fright';
-        c.bubble.say(SCARED[Math.floor(Math.random() * SCARED.length)]);
+        const line = SCARED[Math.floor(Math.random() * SCARED.length)];
+        c.bubble.say(line.text);
         c.sayT = 1.4;
+        speak(line.voice, 10);
       }
     }
     this.hint('chase');
@@ -513,6 +517,7 @@ export class Game {
         this.state = 'dying';
         this.dyingT = 1.8;
         this.shake = 1.3;
+        speak('gotcha', 0, true);
         this.streak = 0;
         this.mult = 1;
         this.sparks.burst(pp.x, 1.5, pp.z, 60, BURST, { up: 8, spread: 9, life: 1.2 });

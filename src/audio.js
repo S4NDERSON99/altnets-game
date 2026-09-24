@@ -23,9 +23,34 @@ export function start() {
   osc.connect(lp).connect(g).connect(master);
   osc.start();
   siren = { osc, g };
+  loadVoices();
 }
 
 export function isMuted() { return muted; }
+
+// Copper voice lines, loaded once sound is allowed.
+const VOICES = ['oi', 'ello', 'sunshine', 'dialup', 'landline', 'legit', 'switchoff', 'gotcha', 'buffering'];
+const voiceBuf = {};
+let voiceBusyUntil = 0;
+function loadVoices() {
+  for (const k of VOICES) {
+    fetch(`/audio/${k}.mp3`).then((r) => r.arrayBuffer()).then((b) => ctx.decodeAudioData(b)).then((buf) => { voiceBuf[k] = buf; }).catch(() => {});
+  }
+}
+
+// dist: metres from the runner; far voices are quieter, one line at a time
+export function speak(key, dist = 0, force = false) {
+  if (!ctx || !voiceBuf[key]) return;
+  if (!force && ctx.currentTime < voiceBusyUntil) return;
+  const src = ctx.createBufferSource();
+  src.buffer = voiceBuf[key];
+  src.playbackRate.value = 0.96 + Math.random() * 0.1;
+  const g = ctx.createGain();
+  g.gain.value = Math.max(0.25, 1 - dist / 40) * 0.9;
+  src.connect(g).connect(master);
+  src.start();
+  voiceBusyUntil = ctx.currentTime + src.buffer.duration / src.playbackRate.value + 0.6;
+}
 
 export function setMuted(v) {
   muted = v;

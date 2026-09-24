@@ -387,10 +387,14 @@ export function buildProps(graph, area, opts = {}) {
       const fx = Math.sin(s.h) * -end, fz = -Math.cos(s.h) * -end;
       const yaw = yawFacing(fx, fz) - 0.5 * side * end;
       const tex = plateTexture(e.name, district);
-      const plate = new THREE.Mesh(plateGeo, new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.28, roughness: 0.5, side: THREE.DoubleSide }));
-      plate.position.set(s.x, at(2.35), s.z);
-      plate.rotation.y = yaw + Math.PI;
-      group.add(plate);
+      // back-to-back faces so the name reads the right way round from both directions
+      const plateMat = new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.28, roughness: 0.5 });
+      for (const flip of [0, Math.PI]) {
+        const plate = new THREE.Mesh(plateGeo, plateMat);
+        plate.position.set(s.x, at(2.35), s.z);
+        plate.rotation.y = yaw + Math.PI + flip;
+        group.add(plate);
+      }
       for (const k of [-1, 1]) posts.push({ x: s.x + Math.cos(yaw) * k * at(0.7), z: s.z - Math.sin(yaw) * k * at(0.7) });
       take(s.x, s.z, 1);
       done.add(key);

@@ -68,35 +68,48 @@ export class Sparks {
   }
 }
 
-export const TAUNTS = ['Oi!', "'Ello 'ello!", 'Stop right there!', 'Back to copper!', 'Dial-up forever!', 'You’re nicked!', 'Oi, slow down!', 'Buffering…'];
+export const TAUNTS = [
+  { text: 'Oi! Stop right there!', voice: 'oi' },
+  { text: "'Ello 'ello 'ello!", voice: 'ello' },
+  { text: 'Back to copper, sunshine!', voice: 'sunshine' },
+  { text: 'Dial-up was good enough for me!', voice: 'dialup' },
+  { text: 'Stop! In the name of the landline!', voice: 'landline' },
+  { text: 'Buffering…', voice: 'buffering' },
+];
+export const SCARED = [
+  { text: 'Leg it, lads!', voice: 'legit' },
+  { text: 'Not the switch-off!', voice: 'switchoff' },
+];
 
 export function makeBubble() {
+  const W = 1024, H = 180;
   const c = document.createElement('canvas');
-  c.width = 512; c.height = 160;
+  c.width = W; c.height = H;
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color: 0xcfcfcf, transparent: true, depthTest: false, fog: false }));
-  sprite.scale.set(4.8, 1.5, 1);
+  sprite.scale.set(9.5, 9.5 * (H / W), 1);
   sprite.center.set(0.5, 0);
-  sprite.position.y = 4.4;
+  sprite.position.y = 4.5;
   sprite.visible = false;
   sprite.renderOrder = 10;
   return {
     sprite,
     say(text) {
       const x = c.getContext('2d');
-      x.clearRect(0, 0, 512, 160);
-      x.font = '900 64px Outfit, system-ui, sans-serif';
-      const w = Math.min(492, x.measureText(text).width + 60);
-      const l = (512 - w) / 2;
+      x.clearRect(0, 0, W, H);
+      let fs = 72;
+      do { x.font = `900 ${fs}px Outfit, system-ui, sans-serif`; fs -= 4; } while (x.measureText(text).width > W - 120 && fs > 36);
+      const w = Math.min(W - 16, x.measureText(text).width + 80);
+      const l = (W - w) / 2;
       x.fillStyle = '#f4f3ef';
       x.beginPath();
-      x.roundRect(l, 10, w, 104, 40);
-      x.moveTo(236, 112); x.lineTo(256, 150); x.lineTo(276, 112);
+      x.roundRect(l, 8, w, 126, 46);
+      x.moveTo(W / 2 - 22, 132); x.lineTo(W / 2, 172); x.lineTo(W / 2 + 22, 132);
       x.fill();
       x.fillStyle = '#0f1414';
       x.textAlign = 'center'; x.textBaseline = 'middle';
-      x.fillText(text, 256, 64);
+      x.fillText(text, W / 2, 72);
       tex.needsUpdate = true;
       sprite.visible = true;
     },

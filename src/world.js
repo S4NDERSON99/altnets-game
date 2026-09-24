@@ -3,13 +3,14 @@
 // and the glowing fibre that replaces it.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { buildProps } from './props.js';
 
 export const COLOURS = {
   sky: 0x07100f,
-  ground: 0x17242a,
-  pavement: 0x46595d,
-  road: 0x2b3b40,
-  kerb: 0x8c989b,
+  ground: 0x55624f,
+  pavement: 0x8c8e88,
+  road: 0x3d454a,
+  kerb: 0xb9bab2,
   copper: 0xc8703c,
   fibre: 0x1ecbc4,
   pink: 0xe8408f,
@@ -21,6 +22,8 @@ export const COLOURS = {
 
 const WIDTH = { trunk: 12, primary: 11, secondary: 10, tertiary: 9, unclassified: 7.5, residential: 7.5, road: 7.5, living_street: 6, pedestrian: 6, service: 5 };
 export const roadWidth = (kind) => WIDTH[kind] || 7;
+// low evening sun in the west, for the sky glow and the long shadows
+const SUN_DIR = new THREE.Vector3(-0.86, 0.3, 0.41).normalize();
 const hasKerb = (kind) => kind !== 'pedestrian' && kind !== 'service' && kind !== 'living_street';
 
 function rng(seed) {
@@ -118,35 +121,36 @@ function sky(scene, R) {
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
-    uniforms: { top: { value: new THREE.Color(0x03080c) }, mid: { value: new THREE.Color(0x0b2129) }, low: { value: new THREE.Color(0x1d4148) } },
+    uniforms: {
+      top: { value: new THREE.Color(0x1f2f6b) }, mid: { value: new THREE.Color(0x8a7fb3) }, low: { value: new THREE.Color(0xf6a66e) },
+      sun: { value: SUN_DIR.clone() }, glow: { value: new THREE.Color(0xffc27a) },
+    },
     vertexShader: 'varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-    fragmentShader: `uniform vec3 top; uniform vec3 mid; uniform vec3 low; varying vec3 vP;
-      void main(){ float h = vP.y; vec3 c = h > 0.08 ? mix(mid, top, smoothstep(0.08, 0.6, h)) : mix(low, mid, smoothstep(-0.02, 0.08, h));
-      gl_FragColor = vec4(c, 1.0); }`,
+    fragmentShader: `uniform vec3 top; uniform vec3 mid; uniform vec3 low; uniform vec3 sun; uniform vec3 glow; varying vec3 vP;
+      void main(){
+        float h = vP.y;
+        vec3 c = h > 0.12 ? mix(mid, top, smoothstep(0.12, 0.75, h)) : mix(low, mid, smoothstep(-0.04, 0.12, h));
+        float s = max(dot(normalize(vP), sun), 0.0);
+        c += glow * (pow(s, 6.0) * 0.55 + pow(s, 60.0) * 0.8);
+        c = mix(c, vec3(1.0, 0.93, 0.8), smoothstep(0.9993, 0.9997, s));
+        gl_FragColor = vec4(c, 1.0);
+      }`,
   });
   const dome = new THREE.Mesh(new THREE.SphereGeometry(2200, 32, 16), mat);
   dome.renderOrder = -10;
   scene.add(dome);
 
   const r = rng(7);
-  const n = 1400;
+  const n = 500;
   const pos = new Float32Array(n * 3);
   for (let i = 0; i < n; i++) {
-    const a = r() * Math.PI * 2, e = 0.12 + Math.pow(r(), 0.7) * 1.3;
+    const a = r() * Math.PI * 2, e = 0.75 + r() * 0.8;
     pos.set([Math.cos(a) * Math.cos(e) * 2000, Math.sin(e) * 2000, Math.sin(a) * Math.cos(e) * 2000], i * 3);
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xbfd9dd, size: 1.6, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.8 })));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xe8ecff, size: 1.4, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.45 })));
 
-  const moon = new THREE.Sprite(new THREE.SpriteMaterial({ map: radialTexture('rgba(235,248,245,1)', 'rgba(235,248,245,0)'), fog: false, depthWrite: false }));
-  moon.scale.setScalar(260);
-  moon.position.set(-900, 900, 520);
-  scene.add(moon);
-  const disc = new THREE.Mesh(new THREE.CircleGeometry(34, 32), new THREE.MeshBasicMaterial({ color: 0xeef8f5, fog: false }));
-  disc.position.copy(moon.position);
-  disc.lookAt(0, 0, 0);
-  scene.add(disc);
 
   skyline(scene, Math.max(900, R * 3.2));
 }
@@ -208,11 +212,11 @@ function skyline(scene, D) {
   spire.translate(0, 103, 0);
   lm(ben, 5.3); lm(spire, 5.3);
 
-  const mat = new THREE.MeshBasicMaterial({ color: 0x0a171b, fog: false });
+  const mat = new THREE.MeshBasicMaterial({ color: 0x5a4f73, fog: false });
   scene.add(new THREE.Mesh(mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)).map((g) => { g.deleteAttribute('uv'); g.deleteAttribute('normal'); return g; })), mat));
   const lg = new THREE.BufferGeometry();
   lg.setAttribute('position', new THREE.Float32BufferAttribute(lights, 3));
-  scene.add(new THREE.Points(lg, new THREE.PointsMaterial({ color: 0xffd28a, size: 2, sizeAttenuation: false, fog: false })));
+  scene.add(new THREE.Points(lg, new THREE.PointsMaterial({ color: 0xffd9a0, size: 1.8, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.8 })));
   // aircraft light on the Shard
   const tip = new THREE.Mesh(new THREE.SphereGeometry(3, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff3030, fog: false }));
   tip.position.set(Math.cos(0.6) * D * 1.1, 300, Math.sin(0.6) * D * 1.1);
@@ -264,6 +268,84 @@ function windowTextures() {
   return { map: make(base), emissiveMap: make(glow) };
 }
 
+// A 48m strip of London shopfronts for the ground floor of every building:
+// painted fascia boards with names, big lit windows, doors and pilasters.
+const SHOPS = [
+  ['Caff', '#2f6b4f'], ['News', '#1e3a6e'], ['Launderette', '#7a2d3a'], ['Chippy', '#1d6f86'],
+  ['Barber', '#23262b'], ['Florist', '#5e7d3a'], ['Deli', '#8a5a2b'], ['Bakery', '#b0473a'],
+  ['Books', '#3b3f7a'], ['Hardware', '#465259'], ['Cafe Bar', '#6b2f5c'], ['Offy', '#2b5d6b'],
+];
+function shopTextures() {
+  const W = 2048, H = 192, n = 6, sw = W / n;
+  const base = document.createElement('canvas');
+  base.width = W; base.height = H;
+  const glow = document.createElement('canvas');
+  glow.width = W; glow.height = H;
+  const b = base.getContext('2d'), e = glow.getContext('2d');
+  e.fillStyle = '#000'; e.fillRect(0, 0, W, H);
+  const r = rng(21);
+  const order = SHOPS.slice().sort(() => r() - 0.5).slice(0, n); // six different shops per strip
+  for (let i = 0; i < n; i++) {
+    const x0 = i * sw;
+    const [name, col] = order[i];
+    // stone pilasters and stallriser
+    b.fillStyle = '#d8d2c4'; b.fillRect(x0, 0, sw, H);
+    // fascia board
+    b.fillStyle = col; b.fillRect(x0 + 10, 14, sw - 20, 40);
+    b.fillStyle = '#f4ecd8'; b.font = '800 30px Outfit, system-ui, sans-serif'; b.textAlign = 'center'; b.textBaseline = 'middle';
+    b.fillText(name.toUpperCase(), x0 + sw / 2, 35);
+    e.fillStyle = 'rgba(255,236,200,0.35)'; e.font = b.font; e.textAlign = 'center'; e.textBaseline = 'middle';
+    e.fillText(name.toUpperCase(), x0 + sw / 2, 35);
+    // window and door
+    const lit = r() < 0.8;
+    const wx = x0 + 22, ww = sw * 0.62, wy = 64, wh = H - 64 - 26;
+    b.fillStyle = lit ? '#ffd9a0' : '#39464c'; b.fillRect(wx, wy, ww, wh);
+    b.fillStyle = 'rgba(40,30,20,0.35)'; for (let k = 1; k < 3; k++) b.fillRect(wx + (ww * k) / 3 - 2, wy, 4, wh);
+    if (lit) { e.fillStyle = '#ffcf8a'; e.globalAlpha = 0.75 + r() * 0.25; e.fillRect(wx, wy, ww, wh); e.globalAlpha = 1; }
+    const dx = wx + ww + 14, dw = sw - (dx - x0) - 22;
+    b.fillStyle = col; b.fillRect(dx, wy - 4, dw, H - wy - 12);
+    b.fillStyle = lit ? '#ffe2b0' : '#2a3236'; b.fillRect(dx + 8, wy + 6, dw - 16, (H - wy) * 0.42);
+    if (lit) { e.fillStyle = 'rgba(255,215,150,0.8)'; e.fillRect(dx + 8, wy + 6, dw - 16, (H - wy) * 0.42); }
+    // awning stripe on some
+    if (r() < 0.45) {
+      for (let s = 0; s < 10; s++) { b.fillStyle = s % 2 ? '#f4ecd8' : col; b.fillRect(wx + (ww / 10) * s, wy, ww / 10, 12); }
+      e.fillStyle = '#000'; e.fillRect(wx, wy, ww, 12);
+    }
+  }
+  const make = (c) => {
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = THREE.RepeatWrapping;
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 8;
+    return t;
+  };
+  return { map: make(base), glow: make(glow) };
+}
+
+const SHOP_H = 4.4; // ground floor height in metres
+
+function withShopfronts(mat) {
+  const shop = shopTextures();
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.shopMap = { value: shop.map };
+    sh.uniforms.shopGlow = { value: shop.glow };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying float vWY;\nvarying float vFlip;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        vWY = transformed.y;
+        // shop names must read left to right from the street on every wall
+        vFlip = abs(objectNormal.z) > abs(objectNormal.x) ? (objectNormal.z < 0.0 ? -1.0 : 1.0) : (objectNormal.x < 0.0 ? -1.0 : 1.0);`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>\nvarying float vWY;\nvarying float vFlip;\nuniform sampler2D shopMap;\nuniform sampler2D shopGlow;\nconst float SHOP_H = ${SHOP_H.toFixed(1)};`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        vec2 su = vec2(vMapUv.x * 22.4 / 48.0 * sign(vFlip), clamp(vWY / SHOP_H, 0.0, 1.0));
+        if (vWY < SHOP_H) diffuseColor.rgb = texture2D(shopMap, su).rgb * 0.95;`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        if (vWY < SHOP_H) totalEmissiveRadiance = texture2D(shopGlow, su).rgb * 0.9;`);
+  };
+  return mat;
+}
+
 function splitGroups(geom) {
   // ExtrudeGeometry is non indexed: group 0 = caps, group 1 = sides
   const parts = [];
@@ -309,7 +391,7 @@ function buildings(list, opts) {
     const kind = b.h > 42 ? 'glass' : r() < 0.5 ? 'brick' : r() < 0.6 ? 'stone' : 'render';
     const pal = FACADES[kind];
     const wall = new THREE.Color(pal[Math.floor(r() * pal.length)]).convertSRGBToLinear();
-    const roof = new THREE.Color(0x2e3a3d).lerp(new THREE.Color(0x4a4640), r()).convertSRGBToLinear();
+    const roof = new THREE.Color(r() < 0.35 ? 0x9a6450 : 0x6d7480).lerp(new THREE.Color(0x8a8f96), r() * 0.5).convertSRGBToLinear();
     const [c, s] = splitGroups(g);
     if (c) caps.push(paint(c, roof, b.h, false));
     if (s) sides.push(paint(s, wall, b.h, true));
@@ -339,7 +421,7 @@ function buildings(list, opts) {
   let red = null;
   if (sides.length) {
     const tex = windowTextures();
-    const wallMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: tex.map, emissive: 0xffffff, emissiveMap: tex.emissiveMap, emissiveIntensity: 0.85 });
+    const wallMat = withShopfronts(new THREE.MeshLambertMaterial({ vertexColors: true, map: tex.map, emissive: 0xffffff, emissiveMap: tex.emissiveMap, emissiveIntensity: 0.6 }));
     const walls = new THREE.Mesh(mergeGeometries(sides), wallMat);
     const roofs = new THREE.Mesh(mergeGeometries(caps), new THREE.MeshLambertMaterial({ vertexColors: true }));
     walls.castShadow = roofs.castShadow = opts.shadows;
@@ -511,20 +593,20 @@ function pulseShader(mat, time) {
 
 export function buildWorld(area, graph, opts = {}) {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0b1a1f);
-  scene.fog = new THREE.FogExp2(0x16323a, 0.0045);
+  scene.background = new THREE.Color(0xd49a82);
+  scene.fog = new THREE.Fog(0xc4a2aa, 140, 950); // evening haze that only builds up in the distance
   const time = { value: 0 };
 
-  scene.add(new THREE.HemisphereLight(0xa9cfd9, 0x3a3226, 3.2));
-  scene.add(new THREE.AmbientLight(0x8aa4aa, 1.5));
-  const moon = new THREE.DirectionalLight(0xc6e2ea, 2.4);
-  moon.position.set(-60, 90, 35);
+  scene.add(new THREE.HemisphereLight(0xb8c4ec, 0x7a5a45, 2.4));
+  scene.add(new THREE.AmbientLight(0xffe6d0, 0.35));
+  const moon = new THREE.DirectionalLight(0xffb37a, 3.4); // the evening sun
+  moon.position.copy(SUN_DIR).multiplyScalar(160);
   scene.add(moon, moon.target);
   if (opts.shadows) {
     moon.castShadow = true;
     moon.shadow.mapSize.set(2048, 2048);
     const c = moon.shadow.camera;
-    c.left = c.bottom = -80; c.right = c.top = 80; c.near = 1; c.far = 400;
+    c.left = c.bottom = -90; c.right = c.top = 90; c.near = 1; c.far = 500;
     moon.shadow.bias = -0.0004;
     moon.shadow.normalBias = 0.4;
   }
@@ -539,6 +621,8 @@ export function buildWorld(area, graph, opts = {}) {
   streets(scene, graph, opts);
   const bld = buildings(area.buildings || [], opts);
   scene.add(bld.group);
+  const props = buildProps(graph, area, opts);
+  scene.add(props.group);
 
   // the old copper network, dashed down the middle of every street
   const copperGeom = new THREE.BoxGeometry(0.2, 0.05, 0.55);
@@ -581,7 +665,7 @@ export function buildWorld(area, graph, opts = {}) {
       if (bld.red) bld.red.visible = Math.floor(t * 1.2) % 2 === 0;
       if (opts.shadows && focus) {
         moon.target.position.set(focus.x, 0, focus.z);
-        moon.position.set(focus.x - 60, 90, focus.z + 35);
+        moon.position.set(focus.x + SUN_DIR.x * 160, SUN_DIR.y * 160, focus.z + SUN_DIR.z * 160);
       }
     },
     layCell(edge, cell) {

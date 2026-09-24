@@ -691,6 +691,7 @@ export class Game {
       const cp = g.pose(c.m);
       v.group.position.set(cp.x, Math.abs(Math.sin(t * 12 + i)) * 0.2, cp.z);
       v.group.rotation.y = -cp.h;
+      v.tick?.(dt, t, this.state === 'play');
     });
 
     for (const p of this.pickups) {

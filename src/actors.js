@@ -34,7 +34,8 @@ export function makeRunner() {
 // Run cycle done in the vertex shader: legs swing from the hips, the cable
 // hair trails and sways, all worked out from the model's own proportions
 // (0 = soles of the trainers, 1 = tips of the cables; the model faces +x).
-function animateMaterial(mesh, uniforms) {
+function animateMaterial(mesh, uniforms, { hair = 1 } = {}) {
+  uniforms.uHair = { value: hair };
   mesh.geometry.computeBoundingBox();
   const b = mesh.geometry.boundingBox;
   uniforms.uB = { value: new THREE.Vector4(b.min.y, b.max.y - b.min.y, (b.min.z + b.max.z) / 2, (b.max.z - b.min.z) / 2) };
@@ -42,7 +43,7 @@ function animateMaterial(mesh, uniforms) {
   mesh.material.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, uniforms);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform vec4 uB; uniform float uCx; uniform float uPhase; uniform float uRun; uniform float uTime; uniform vec2 uSway;')
+      .replace('#include <common>', '#include <common>\nuniform vec4 uB; uniform float uCx; uniform float uPhase; uniform float uRun; uniform float uTime; uniform vec2 uSway; uniform float uHair;')
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         float f = (transformed.y - uB.x) / uB.y;
         float H = uB.y;
@@ -54,7 +55,7 @@ function animateMaterial(mesh, uniforms) {
         transformed.x = uCx + dx * cos(a) - dy * sin(a);
         transformed.y = py + dx * sin(a) + dy * cos(a) + max(0.0, sin(uPhase) * side) * 0.045 * H * uRun * legW;
         float h = clamp((f - 0.7) / 0.3, 0.0, 1.0);
-        float hh = h * h;
+        float hh = h * h * uHair;
         transformed.x -= hh * H * (0.11 * uRun + 0.018 * sin(uTime * 11.0 + f * 14.0));
         transformed.z += hh * H * (uSway.x * 0.3 + 0.025 * sin(uTime * 8.0 + transformed.x * 30.0));
         transformed.y += hh * H * 0.025 * sin(uPhase * 2.0) * uRun;`);
@@ -129,8 +130,25 @@ function mat(color, extra = {}) {
 }
 
 // A copper: a coiled copper-cable body under a custodian helmet, blue lamp on top.
+// One shared load of the 3D copper; every copper gets its own copy.
+let copperModel = null;
+const copperWaiting = [];
+function withCopperModel(cb) {
+  if (copperModel) return cb(copperModel);
+  copperWaiting.push(cb);
+  if (copperWaiting.length > 1) return;
+  const loader = new GLTFLoader();
+  loader.setMeshoptDecoder(MeshoptDecoder);
+  loader.load('/models/copper.glb', (gltf) => {
+    copperModel = gltf.scene;
+    copperWaiting.splice(0).forEach((f) => f(copperModel));
+  }, undefined, () => { copperWaiting.length = 0; });
+}
+
 export function makeCopper(tint) {
   const g = new THREE.Group();
+  const proc = new THREE.Group(); // simple fallback copper until the model loads
+  g.add(proc);
   const bodyMat = mat(tint, { metalness: 0.75, roughness: 0.32, emissive: new THREE.Color(tint).multiplyScalar(0.12) });
   const coilMat = mat(0x7a3a17, { metalness: 0.8, roughness: 0.3 });
   const navy = mat(0x18214a, { roughness: 0.55 });
@@ -140,22 +158,22 @@ export function makeCopper(tint) {
 
   const body = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 1.0, 1.9, 20), bodyMat);
   body.position.y = 0.95;
-  g.add(body);
+  proc.add(body);
   for (let i = 0; i < 2; i++) {
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.97 - i * 0.03, 0.09, 8, 24), coilMat);
     ring.rotation.x = Math.PI / 2;
     ring.position.y = 0.3 + i * 0.36;
-    g.add(ring);
+    proc.add(ring);
   }
   // hi-vis police jacket with reflective bands and a blue and white chequer
   const hivisMat = mat(0xd4ef1f, { roughness: 0.6, emissive: new THREE.Color(0x3a4a00) });
   const vest = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.96, 1.05, 20), hivisMat);
   vest.position.y = 1.38;
-  g.add(vest);
+  proc.add(vest);
   for (const y of [1.12, 1.62]) {
     const band = new THREE.Mesh(new THREE.CylinderGeometry(0.915 + (y > 1.4 ? -0.015 : 0.01), 0.925 + (y > 1.4 ? -0.01 : 0.02), 0.12, 20), mat(0xe8eef0, { metalness: 0.9, roughness: 0.15, emissive: new THREE.Color(0x333a3c) }));
     band.position.y = y;
-    g.add(band);
+    proc.add(band);
   }
   const chequer = new THREE.CanvasTexture((() => {
     const c = document.createElement('canvas'); c.width = 64; c.height = 16;
@@ -168,48 +186,94 @@ export function makeCopper(tint) {
   chequer.repeat.set(3, 1);
   const cheq = new THREE.Mesh(new THREE.CylinderGeometry(0.73, 0.73, 0.16, 24, 1, true), new THREE.MeshStandardMaterial({ map: chequer, roughness: 0.5 }));
   cheq.position.y = 2.5;
-  g.add(cheq);
+  proc.add(cheq);
   const radio = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.34, 0.12), mat(0x111111));
   radio.position.set(0.45, 1.65, -0.82);
-  g.add(radio);
+  proc.add(radio);
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.82, 20, 14), bodyMat);
   head.position.y = 2.05;
-  g.add(head);
+  proc.add(head);
   const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.72, 20, 14), navy);
   helmet.scale.set(1, 1.35, 1);
   helmet.position.y = 2.75;
-  g.add(helmet);
+  proc.add(helmet);
   const brim = new THREE.Mesh(new THREE.TorusGeometry(0.72, 0.08, 8, 24), navy);
   brim.rotation.x = Math.PI / 2;
   brim.position.y = 2.42;
-  g.add(brim);
+  proc.add(brim);
   const badge = new THREE.Mesh(new THREE.CircleGeometry(0.2, 8), silver);
   badge.position.set(0, 2.85, -0.72);
   badge.rotation.y = Math.PI;
-  g.add(badge);
+  proc.add(badge);
   const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 8), new THREE.MeshBasicMaterial({ color: 0x3d8bff }));
   lamp.position.y = 3.72;
-  g.add(lamp);
+  proc.add(lamp);
   for (const s of [-1, 1]) {
     const eye = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 10), white);
     eye.position.set(s * 0.3, 2.12, -0.72);
-    g.add(eye);
+    proc.add(eye);
     const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), black);
     pupil.position.set(s * 0.3, 2.12, -0.9);
-    g.add(pupil);
+    proc.add(pupil);
   }
   const shadow = new THREE.Mesh(new THREE.CircleGeometry(1.1, 20), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.4, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2;
   shadow.position.y = 0.14;
   g.add(shadow);
 
+  g.add(lamp);
   const frightBody = new THREE.Color(0x7c9094);
   const baseBody = new THREE.Color(tint);
-  return {
-    group: g,
-    lamp,
+  const view = { group: g, lamp, model: null, mats: [], uniforms: null };
+  withCopperModel((src) => {
+    const model = src.clone(true);
+    const uniforms = { uPhase: { value: Math.random() * 6 }, uRun: { value: 0 }, uTime: { value: 0 }, uSway: { value: new THREE.Vector2() } };
+    const box = new THREE.Box3().setFromObject(model);
+    const size = box.getSize(new THREE.Vector3());
+    const s = 3.9 / size.y;
+    model.scale.setScalar(s);
+    const c = box.getCenter(new THREE.Vector3());
+    model.position.set(-c.x * s, -box.min.y * s, -c.z * s);
+    model.traverse((o) => {
+      if (!o.isMesh) return;
+      o.material = o.material.clone();
+      o.material.metalness = Math.min(o.material.metalness, 0.6);
+      o.castShadow = true;
+      o.frustumCulled = false;
+      view.mats.push(o.material);
+      animateMaterial(o, uniforms, { hair: 0 });
+    });
+    const holder = new THREE.Group();
+    holder.rotation.y = Math.PI / 2; // the model faces +x, coppers face -z
+    holder.add(model);
+    g.add(holder);
+    lamp.position.y = 4.05;
+    proc.visible = false;
+    view.model = holder;
+    view.uniforms = uniforms;
+  });
+  const greyC = new THREE.Color(0x8fa3b0), whiteC = new THREE.Color(0xffffff);
+  return Object.assign(view, {
+    // walking waddle for the 3D model
+    tick(dt, t, moving) {
+      if (!view.uniforms) return;
+      const u = view.uniforms;
+      u.uRun.value += ((moving ? 1 : 0) - u.uRun.value) * (1 - Math.exp(-dt * 8));
+      u.uPhase.value += dt * 13 * (moving ? 1 : 0);
+      u.uTime.value = t;
+      view.model.rotation.z = Math.sin(u.uPhase.value) * 0.06 * u.uRun.value;
+    },
     setLook(state, t, flashing) {
       g.visible = state !== 'hidden';
+      if (view.model) {
+        const col = state === 'fright' ? (flashing && Math.floor(t * 6) % 2 ? whiteC : greyC) : whiteC;
+        for (const m of view.mats) {
+          m.color.copy(col);
+          if (m.emissive) m.emissive.setScalar(state === 'fright' && flashing && Math.floor(t * 6) % 2 ? 0.25 : 0);
+        }
+        lamp.material.color.set(state === 'fright' ? 0x666666 : Math.floor(t * 4) % 2 ? 0x3d8bff : 0x0b1f55);
+        return;
+      }
       if (state === 'fright') {
         const white = flashing && Math.floor(t * 6) % 2;
         bodyMat.color.set(white ? 0xe6eeee : frightBody);
@@ -227,7 +291,7 @@ export function makeCopper(tint) {
         lamp.material.color.set(Math.floor(t * 4) % 2 ? 0x3d8bff : 0x0b1f55);
       }
     },
-  };
+  });
 }
 
 // a tall soft beam so power-ups can be spotted from streets away

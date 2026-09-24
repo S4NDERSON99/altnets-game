@@ -3,6 +3,25 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
+
+// Final look: warm highlights, cool shadows, a little more saturation and a soft vignette.
+const GradeShader = {
+  uniforms: { tDiffuse: { value: null } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv;
+    void main(){
+      vec4 c = texture2D(tDiffuse, vUv);
+      float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+      c.rgb = mix(vec3(l), c.rgb, 1.16);
+      c.rgb = (c.rgb - 0.5) * 1.07 + 0.5;
+      c.rgb += mix(vec3(-0.012, 0.0, 0.03), vec3(0.035, 0.012, -0.03), smoothstep(0.2, 0.8, l));
+      vec2 d = vUv - 0.5;
+      c.rgb *= 1.0 - dot(d, d) * 0.55;
+      gl_FragColor = vec4(clamp(c.rgb, 0.0, 1.0), c.a);
+    }`,
+};
 import { Game } from './game.js';
 import * as audio from './audio.js';
 
@@ -21,7 +40,7 @@ const canvas = $('scene');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: !coarse, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, coarse ? 1.5 : 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.1;
+renderer.toneMappingExposure = 1.2;
 renderer.shadowMap.enabled = !coarse;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 let composer = null;
@@ -36,9 +55,17 @@ function setupComposer() {
   const size = renderer.getDrawingBufferSize(new THREE.Vector2());
   composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: coarse ? 2 : 4 }));
   composer.addPass(new RenderPass(game.scene, game.camera));
+  if (!coarse) {
+    // soft contact shading where walls, kerbs and props meet the ground
+    const ao = new GTAOPass(game.scene, game.camera, innerWidth, innerHeight);
+    ao.updateGtaoMaterial({ radius: 2.2, distanceExponent: 1.5, thickness: 2, scale: 1.1 });
+    ao.blendIntensity = 0.85;
+    composer.addPass(ao);
+  }
   bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.55, 0.45, 0.82);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
+  composer.addPass(new ShaderPass(GradeShader));
   resize();
 }
 
@@ -68,7 +95,7 @@ function disposeScene(scene) {
 function mountGame(a) {
   if (game) disposeScene(game.scene);
   area = a;
-  game = new Game(a, onGameEvent, { shadows: !coarse });
+  game = new Game(a, onGameEvent, { shadows: !coarse, lowEnd: coarse });
   try { JSON.parse(store.get('altnets-hints') || '[]').forEach((k) => game.hints.add(k)); } catch { /* ignore */ }
   setupComposer();
 }

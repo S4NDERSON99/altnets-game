@@ -74,7 +74,10 @@ function resize() {
   renderer.setSize(w, h, false);
   if (game) {
     game.camera.aspect = w / h;
-    game.baseFov = game.camera.fov = w < h ? 74 : 62;
+    game.baseFov = game.camera.fov = w < h ? 70 : 62;
+    game.camBack = w < h ? 8 : 9.5;
+    game.camUp = w < h ? 4.6 : 5.2;
+    game.reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
     game.camera.updateProjectionMatrix();
   }
   if (composer) {
@@ -144,10 +147,14 @@ function updateHud() {
     const st = game.stationDist != null && game.stationDist > area.radius + 150
       ? `Coppers dispatched from ${game.stationName}, ${(game.stationDist / 1000).toFixed(1)}km away`
       : `Coppers dispatched from ${game.stationName}`;
-    const title = { start: 'Ready?', round: `Round ${game.round}`, respawn: 'Back on the run' }[game.readyReason] || 'Ready?';
+    const intro = { start: 'Ready?', round: `Round ${game.round}`, respawn: 'Back on the run' }[game.readyReason] || 'Ready?';
+    const count = Math.ceil(game.readyT);
+    const title = game.readyT > 2.4 ? intro : String(count);
     const where = area.postcode === 'EC4M 7EH' ? 'Breaking out of the Old Bailey' : `Breaking out on ${h.street || 'a back lane'}`;
-    const html = `<div class="big">${title}</div><div class="sub">${esc(where)} &middot; ${esc(area.label)}</div><div class="sub">${esc(st)}</div>`;
-    if (banner.dataset.k !== 'ready' + game.round + game.lives) { banner.innerHTML = html; banner.dataset.k = 'ready' + game.round + game.lives; }
+    const skip = game.intro && game.readyT > 1 ? `<div class="skip">${coarse ? 'Tap' : 'Press any key'} to skip</div>` : '';
+    const html = `<div class="big${title.length === 1 ? ' count' : ''}">${title}</div><div class="sub">${esc(where)} &middot; ${esc(area.label)}</div><div class="sub">${esc(st)}</div>${skip}`;
+    const key = 'ready' + game.round + game.lives + title + (skip ? 1 : 0);
+    if (banner.dataset.k !== key) { banner.innerHTML = html; banner.dataset.k = key; }
     banner.hidden = false;
   } else if (banner.dataset.k?.startsWith('ready')) {
     banner.hidden = true;
@@ -235,6 +242,7 @@ function titleScreen(message = '') {
   audio.setMusic(false);
   if (game) { game.attract = true; game.state = 'title'; }
   const last = store.get('altnets-postcode') || '';
+  const best = Number(store.get('altnets-best') || 0);
   show(`
   <div class="card">
     <div class="title-grid">
@@ -244,21 +252,20 @@ function titleScreen(message = '') {
         <div class="wordmark"><span>The</span>Altnets</div>
         <p class="game-name">Escape the Coppers</p>
         <span class="swoosh"></span>
-        <p class="lede">Our hero has just legged it out of the Old Bailey. Every street it runs down gets <b>full fibre</b>. The coppers want Britain kept on copper. Connect every street in your area before they nick you.</p>
+        <p class="lede"><span class="long">Our hero has just legged it out of the Old Bailey. </span>Every street it runs down gets <b>full fibre</b>. Connect your whole area before the coppers nick you.</p>
         <form class="postcode" id="pcForm" novalidate>
-          <label for="pc">Enter your postcode to play your own streets</label>
-          <div class="row">
-            <input id="pc" name="pc" autocomplete="postal-code" inputmode="text" placeholder="e.g. EC4M 7EH" maxlength="8" value="${esc(last)}" data-autofocus>
-            <button class="btn teal" type="submit">Start running</button>
-          </div>
+          <label for="pc">Your postcode</label>
+          <input id="pc" name="pc" autocomplete="postal-code" autocapitalize="characters" spellcheck="false" inputmode="text" placeholder="e.g. EC4M 7EH" maxlength="8" value="${esc(last)}" data-autofocus aria-describedby="pcError pcNote">
           <p class="error" id="pcError" role="alert">${esc(message)}</p>
+          <button class="btn teal wide" type="submit">Play my streets</button>
+          <button class="btn ghost wide" type="button" id="playDemo">Play the Old Bailey</button>
+          <p class="note" id="pcNote">Your postcode only draws the map.${best ? ` <b class="best-chip">Your best: ${best.toLocaleString('en-GB')}</b>` : ''}</p>
         </form>
-        <div class="form-foot"><button class="linkish" type="button" id="playDemo">Or play the Old Bailey</button><span>Your postcode is only used to draw the map.</span></div>
         <ul class="how">
-          <li class="keys-only"><kbd>&larr;</kbd><kbd>&rarr;</kbd> turn left or right</li>
+          <li class="keys-only"><kbd>&larr;</kbd><kbd>&rarr;</kbd> turn at the next junction</li>
           <li class="keys-only"><kbd>Space</kbd> jump roadworks</li>
           <li class="keys-only"><kbd>&darr;</kbd> U-turn</li>
-          <li class="touch-only">Tap left or right side to turn</li>
+          <li class="touch-only">Tap or swipe left and right to turn</li>
           <li class="touch-only">Swipe up to jump</li>
           <li><span class="dot" style="background:var(--yellow)"></span> Switch-off: the coppers run for it</li>
           <li><span class="dot" style="background:var(--pink)"></span> Gigabit: speed boost</li>
@@ -274,6 +281,12 @@ function titleScreen(message = '') {
     startWithPostcode(pc);
   });
   $('playDemo').addEventListener('click', () => startDemo());
+  // tidy the postcode as it's typed: capitals, one space before the last three characters
+  $('pc').addEventListener('input', (e) => {
+    const raw = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 7);
+    e.target.value = raw.length > 4 ? `${raw.slice(0, -3)} ${raw.slice(-3)}` : raw;
+    $('pcError').textContent = '';
+  });
 }
 
 async function startWithPostcode(pc) {
@@ -349,7 +362,7 @@ function overScreen() {
     <div class="stats">
       <div><small>Score</small><b>${game.score.toLocaleString('en-GB')}</b></div>
       <div><small>On fibre</small><b>${pct}%</b></div>
-      <div><small>Streets done</small><b>${game.streetsDone}</b></div>
+      <div><small>Streets</small><b>${game.streetsDone}</b></div>
     </div>
     <p class="best">${game.score >= best && game.score > 0 ? 'New personal best!' : `Your best: ${best.toLocaleString('en-GB')}`}</p>
     <p class="tagline">${TAGLINES[Math.floor(Math.random() * TAGLINES.length)]}</p>
@@ -359,7 +372,6 @@ function overScreen() {
     </div>
     <div class="share">
       <img class="card-preview" id="cardPreview" alt="Your share card" hidden>
-      <input id="shareText" readonly value="${esc(share)}" aria-label="Share text">
       <div class="share-row"><button class="linkish" id="copy" type="button">Copy my score</button><button class="linkish" id="newPc" type="button">Try another postcode</button></div>
     </div>
     <a class="cta" href="https://thealtnets.com" target="_blank" rel="noopener">Visit thealtnets.com &rarr;</a>
@@ -367,9 +379,16 @@ function overScreen() {
   $('again').addEventListener('click', () => { mountGame(area); play(); });
   wireShare({ area, graph: game.g, score: game.score, pct, caughtBy: game.caughtBy?.name || null, cleared: false, round: game.round }, share);
   $('copy').addEventListener('click', () => {
-    const btn = $('copy'), input = $('shareText');
-    navigator.clipboard?.writeText(share).then(() => { btn.textContent = 'Copied'; }).catch(() => { input.select(); btn.textContent = 'Press Ctrl+C to copy'; })
-      ?? (input.select(), (btn.textContent = 'Press Ctrl+C to copy'));
+    const btn = $('copy');
+    const fallback = () => {
+      const t = document.createElement('textarea');
+      t.value = share; t.setAttribute('readonly', ''); t.style.position = 'fixed'; t.style.opacity = '0';
+      document.body.appendChild(t); t.select();
+      try { document.execCommand('copy'); btn.textContent = 'Copied'; } catch { btn.textContent = 'Could not copy'; }
+      t.remove();
+    };
+    if (navigator.clipboard) navigator.clipboard.writeText(share).then(() => { btn.textContent = 'Copied'; }).catch(fallback);
+    else fallback();
   });
 }
 
@@ -402,12 +421,23 @@ function pauseScreen() {
   <div class="card narrow">
     <h2 class="big-title">Paused</h2>
     <p class="story">Having a breather on ${esc(game.hud().street || 'a back lane')}.</p>
-    <div class="actions" style="margin-top:20px">
-      <button class="btn teal" id="resume" data-autofocus>Keep running</button>
-      <button class="btn ghost" id="quit">Quit to start</button>
+    <div class="menu">
+      <button class="btn teal wide" id="resume" data-autofocus>Keep running</button>
+      <button class="btn ghost wide" id="soundToggle">${audio.isMuted() ? 'Sound: off' : 'Sound: on'}</button>
+      <button class="btn ghost wide" id="restart">Start this area again</button>
+      <button class="linkish" id="quit">Quit to the start</button>
     </div>
+    <ul class="how compact">
+      <li class="keys-only"><kbd>&larr;</kbd><kbd>&rarr;</kbd> turn</li>
+      <li class="keys-only"><kbd>Space</kbd> jump</li>
+      <li class="keys-only"><kbd>&darr;</kbd> U-turn</li>
+      <li class="keys-only"><kbd>M</kbd> sound</li>
+      <li class="touch-only">Tap or swipe left and right to turn, swipe up to jump, swipe down to turn round</li>
+    </ul>
   </div>`);
   $('resume').addEventListener('click', resume);
+  $('soundToggle').addEventListener('click', () => { toggleMute(); $('soundToggle').textContent = audio.isMuted() ? 'Sound: off' : 'Sound: on'; });
+  $('restart').addEventListener('click', () => { paused = false; mountGame(area); play(); });
   $('quit').addEventListener('click', () => { paused = false; titleScreen(); });
 }
 
@@ -456,6 +486,7 @@ addEventListener('keydown', (e) => {
     if ((k === 'Escape' || k === 'p' || k === 'P') && paused) { e.preventDefault(); resume(); }
     return;
   }
+  if (game.state === 'ready' && game.intro && !['ArrowLeft', 'ArrowRight', 'a', 'A', 'd', 'D'].includes(k)) { e.preventDefault(); game.skipIntro(); return; }
   if (k === 'ArrowLeft' || k === 'a' || k === 'A') { e.preventDefault(); game.turn('left'); }
   else if (k === 'ArrowRight' || k === 'd' || k === 'D') { e.preventDefault(); game.turn('right'); }
   else if (k === 'ArrowDown' || k === 's' || k === 'S') { e.preventDefault(); game.uturn(); }
@@ -471,8 +502,10 @@ canvas.addEventListener('pointermove', (e) => {
   const dy = e.clientY - touch.y, dx = e.clientX - touch.x;
   if (dy < -35 && Math.abs(dy) > Math.abs(dx)) { touch.used = true; game.jump(); }
   else if (dy > 45 && Math.abs(dy) > Math.abs(dx)) { touch.used = true; game.uturn(); }
+  else if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) { touch.used = true; game.turn(dx < 0 ? 'left' : 'right'); }
 });
 canvas.addEventListener('pointerup', (e) => {
+  if (touch && !touch.used && game?.state === 'ready' && game.intro) { game.skipIntro(); touch = null; return; }
   if (touch && !touch.used && playing()) game.turn(e.clientX < innerWidth / 2 ? 'left' : 'right');
   touch = null;
 });
@@ -486,7 +519,13 @@ $('pad').addEventListener('pointerdown', (e) => {
 });
 
 $('pauseBtn').addEventListener('click', () => { if (playing()) pauseScreen(); });
-function syncMute() { $('muteBtn').textContent = audio.isMuted() ? 'Sound off' : 'Sound on'; }
+const ICON_ON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+const ICON_OFF = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 9l5 6M21 9l-5 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+function syncMute() {
+  const off = audio.isMuted();
+  $('muteBtn').innerHTML = off ? ICON_OFF : ICON_ON;
+  $('muteBtn').setAttribute('aria-label', off ? 'Turn sound on' : 'Turn sound off');
+}
 function toggleMute() { audio.setMuted(!audio.isMuted()); syncMute(); }
 $('muteBtn').addEventListener('click', toggleMute);
 

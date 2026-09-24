@@ -64,7 +64,8 @@ button { cursor: pointer; }
   pointer-events: none;
 }
 .hud button { pointer-events: auto; }
-.hud-area { font-size: 0.78rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); margin-top: 4px; }
+.hud-where { min-width: 0; }
+.hud-area { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46vw; font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dim); margin-top: 4px; }
 .hud-meter { max-width: 420px; width: 100%; justify-self: center; }
 .meter { height: 8px; border-radius: 99px; background: rgba(200, 112, 60, 0.35); overflow: hidden; }
 .meter i {
@@ -82,6 +83,12 @@ button { cursor: pointer; }
 .hud-score b { font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; }
 .lives { display: flex; gap: 2px; }
 .lives img { width: 18px; height: 35px; object-fit: contain; }
+.icon-btn {
+  width: 40px; height: 40px; display: grid; place-items: center;
+  border: 1px solid var(--line); background: var(--glass); color: var(--text);
+  border-radius: 50%; padding: 0;
+}
+.icon-btn svg { width: 20px; height: 20px; fill: currentColor; }
 .chip-btn {
   border: 1px solid var(--line); background: var(--glass); color: var(--text);
   border-radius: 99px; padding: 6px 12px; font-size: 0.78rem; font-weight: 600;
@@ -192,7 +199,14 @@ button { cursor: pointer; }
 .lede { font-size: 1.02rem; line-height: 1.55; color: var(--ink-2); margin: 0 0 22px; max-width: 46ch; text-wrap: pretty; }
 .lede b { color: var(--ink); }
 
-.postcode { display: grid; gap: 8px; }
+.postcode { display: grid; gap: 10px; max-width: 420px; }
+.btn.wide { width: 100%; }
+.note { margin: 2px 0 0; font-size: 0.84rem; color: var(--ink-2); }
+.best-chip { display: inline-block; margin-left: 6px; background: var(--ink); color: #fff; border-radius: 99px; padding: 2px 10px; font-size: 0.78rem; }
+.menu { display: grid; gap: 10px; margin-top: 18px; }
+.how.compact { justify-content: center; margin-top: 18px; }
+.banner .big.count { font-size: clamp(4rem, 16vw, 7rem); color: var(--yellow); }
+.banner .skip { margin-top: 14px; font-size: 0.85rem; color: var(--text); opacity: 0.75; text-shadow: 0 2px 10px #000; }
 .postcode label { font-weight: 700; font-size: 0.85rem; }
 .postcode .row { display: flex; gap: 8px; flex-wrap: wrap; }
 .postcode input {
@@ -247,7 +261,8 @@ kbd { font-family: inherit; font-weight: 800; font-size: 0.78rem; background: #f
   .hud-meter { grid-column: 1 / -1; grid-row: 2; max-width: none; }
   .hud-where .wordmark { display: none; }
   .hud-area { margin-top: 0; }
-  .chip-btn#muteBtn { display: none; }
+  .icon-btn { width: 36px; height: 36px; }
+  .lede .long { display: none; }
   #minimap { width: 104px; height: 104px; top: calc(env(safe-area-inset-top, 0px) + 96px); }
   .status { bottom: calc(env(safe-area-inset-bottom, 0px) + 150px); }
   .hint { bottom: calc(env(safe-area-inset-bottom, 0px) + 196px); }

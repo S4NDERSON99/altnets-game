@@ -210,6 +210,10 @@ export class Game {
     this.readyReason = 'start';
   }
 
+  skipIntro() {
+    if (this.state === 'ready' && this.intro) this.readyT = Math.min(this.readyT, 0.9);
+  }
+
   // ---------------------------------------------------------------- input
 
   turn(want) {
@@ -806,10 +810,11 @@ export class Game {
     const fx = Math.sin(this.camH), fz = -Math.cos(this.camH);
     // the camera rides the runner's own path, so it stays in the street round corners
     this.addTrail(pp);
-    const back = this.behind(pp, 9.5);
-    const want = new THREE.Vector3(back.x, 5.2, back.z);
+    const back = this.behind(pp, this.camBack || 9.5);
+    const want = new THREE.Vector3(back.x, this.camUp || 5.2, back.z);
     const look = new THREE.Vector3(pp.x + fx * 8, 2.2, pp.z + fz * 8);
-    if (this.state === 'ready' && this.intro) {
+    if (this.state === 'ready' && this.intro && this.reducedMotion) this.readyT = Math.min(this.readyT, 1.2);
+    if (this.state === 'ready' && this.intro && !this.reducedMotion) {
       // swoop down from above the whole area onto the runner
       const k = 1 - Math.max(0, this.readyT) / INTRO;
       const e = k < 0.25 ? 0 : 1 - Math.pow(1 - (k - 0.25) / 0.75, 3);
@@ -822,6 +827,7 @@ export class Game {
       cam.lookAt(look);
       cam.rotateZ(-wrap(pp.h - this.camH) * 0.35);
     }
+    if (this.reducedMotion) this.shake = 0;
     if (this.shake > 0) {
       this.shake = Math.max(0, this.shake - dt * 1.8);
       const s = this.shake * this.shake;

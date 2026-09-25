@@ -5,10 +5,10 @@
 // of the centre line the runner and coppers use.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { roadWidth } from './world.js';
+import { roadWidth, toon, inkOutline, PALETTE } from './world.js';
 
 const S = 1.3; // cartoon scale to match the 4m mascot
-const RED = 0xc8232c, BLACK = 0x15181b, GOLD = 0xc9a24a;
+const RED = 0xfc1057, BLACK = 0x0b0c10, GOLD = 0xc9a24a;
 
 function rng(seed) {
   return () => {
@@ -25,6 +25,7 @@ function rng(seed) {
 function part(geo, colour, x = 0, y = 0, z = 0, ry = 0) {
   let g = geo.index ? geo.toNonIndexed() : geo;
   g.deleteAttribute('uv');
+  g.computeVertexNormals(); // flat facets for the low-poly look
   if (ry) g.rotateY(ry);
   g.translate(x, y, z);
   const c = new THREE.Color(colour);
@@ -66,8 +67,8 @@ const bollard = () => kit([
   part(new THREE.SphereGeometry(at(0.12), 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), BLACK, 0, at(0.95)),
 ]);
 const trunk = () => kit([
-  part(cyl(0.16, 0.24, 3.2, 8), 0xb8ab8c, 0, at(1.6)),
-  part(cyl(0.1, 0.14, 1.2, 6), 0xa89b7c, at(0.3), at(3.2), 0, 0),
+  part(cyl(0.16, 0.24, 3.2, 8), 0x6a5a8a, 0, at(1.6)),
+  part(cyl(0.1, 0.14, 1.2, 6), 0x5a4a7a, at(0.3), at(3.2), 0, 0),
 ]);
 const canopy = () => kit([
   part(new THREE.IcosahedronGeometry(at(1.7), 1), 0xffffff, 0, at(4.6)),
@@ -280,7 +281,7 @@ export function buildProps(graph, area, opts = {}) {
           const s = spot(e, d, side, w / 2 + 1.9);
           if (nearJunction(s.x, s.z, w / 2 + 6) || inBuilding(s.x, s.z, 1.4) || !free(s.x, s.z, 1.8)) continue;
           if (lists.tree.length >= (low ? 60 : 140)) break;
-          const tint = new THREE.Color().setHSL(0.22 + r() * 0.07, 0.42 + r() * 0.15, 0.3 + r() * 0.1);
+          const tint = new THREE.Color().setHSL(0.44 + r() * 0.08, 0.45 + r() * 0.15, 0.36 + r() * 0.12);
           push('tree', s.x, s.z, r() * Math.PI * 2, 0.85 + r() * 0.35, tint);
           take(s.x, s.z, 2.2);
         }
@@ -322,9 +323,9 @@ export function buildProps(graph, area, opts = {}) {
   }
 
   // ---------------------------------------------------------------- build meshes
-  const solid = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.05 });
+  const solid = toon({ vertexColors: true, roughness: 0.62, metalness: 0.05 });
   const glowMat = new THREE.MeshBasicMaterial({ vertexColors: true });
-  const leafMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, flatShading: true });
+  const leafMat = toon({ color: 0xffffff, roughness: 0.85, flatShading: true });
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
   const fill = (inst, list, colours = false) => {
     list.forEach((it, i) => {
@@ -388,7 +389,7 @@ export function buildProps(graph, area, opts = {}) {
       const yaw = yawFacing(fx, fz) - 0.5 * side * end;
       const tex = plateTexture(e.name, district);
       // back-to-back faces so the name reads the right way round from both directions
-      const plateMat = new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.28, roughness: 0.5 });
+      const plateMat = toon({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.28, roughness: 0.5 });
       for (const flip of [0, Math.PI]) {
         const plate = new THREE.Mesh(plateGeo, plateMat);
         plate.position.set(s.x, at(2.35), s.z);
@@ -401,7 +402,7 @@ export function buildProps(graph, area, opts = {}) {
     }
   }
   if (posts.length) {
-    const inst = new THREE.InstancedMesh(postGeo, new THREE.MeshStandardMaterial({ color: 0x1b1d20, roughness: 0.6 }), posts.length);
+    const inst = new THREE.InstancedMesh(postGeo, toon({ color: 0x1b1d20, roughness: 0.6 }), posts.length);
     posts.forEach((p, i) => { m4.makeTranslation(p.x, at(1.15), p.z); inst.setMatrixAt(i, m4); });
     group.add(inst);
   }

@@ -1,6 +1,6 @@
 :root {
   color-scheme: dark;
-  --night: #07100f;
+  --night: #150f3d;
   --paper: #f4f3ef;
   --paper-2: #e9e8e2;
   --ink: #0f1414;
@@ -12,7 +12,7 @@
   --yellow: #f6c521;
   --orange: #f28a24;
   --blue: #2f72e6;
-  --glass: rgba(7, 16, 15, 0.72);
+  --glass: rgba(21, 15, 61, 0.72);
   --line: rgba(234, 246, 245, 0.14);
   --text: #eaf6f5;
   --dim: #9bb4b3;

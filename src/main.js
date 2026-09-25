@@ -49,6 +49,7 @@ let bloom = null;
 let game = null;
 let area = null;
 let paused = false;
+let playMode = 'demo'; // 'postcode' when the player is on their own streets
 
 function setupComposer() {
   // multisampled target keeps edges smooth through the bloom pass
@@ -75,8 +76,8 @@ function resize() {
   if (game) {
     game.camera.aspect = w / h;
     game.baseFov = game.camera.fov = w < h ? 70 : 62;
-    game.camBack = w < h ? 8 : 9.5;
-    game.camUp = w < h ? 4.6 : 5.2;
+    game.camBack = w < h ? 9.5 : 11;
+    game.camUp = w < h ? 6.0 : 6.6;
     game.reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
     game.camera.updateProjectionMatrix();
   }
@@ -136,6 +137,15 @@ function updateHud() {
     $('multChip').hidden = !mult;
     $('multChip').textContent = `Streak x${mult}`;
   }
+  // fibre finder chip: distance and an arrow relative to where you're facing
+  const fc = $('finderChip');
+  if (h.finder && game.state === 'play') {
+    const pp = game.g.pose(game.p);
+    const ang = Math.atan2(h.finder.x - pp.x, -(h.finder.z - pp.z)) - game.camH;
+    fc.hidden = false;
+    fc.querySelector('i').style.transform = `rotate(${ang}rad)`;
+    fc.querySelector('b').textContent = `Fibre gap ${h.finder.dist}m`;
+  } else fc.hidden = true;
   const power = h.fright > 0 ? Math.ceil(h.fright) : 0;
   if (power !== hud.power) {
     hud.power = power;
@@ -180,6 +190,41 @@ function pop(text, tone) {
 }
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// ------------------------------------------------------------ copper warnings
+// Arrows on the screen edge for coppers you can't see, and a red glow when close.
+const threatEls = [];
+const tv = new THREE.Vector3();
+function drawThreats() {
+  const box = $('threats');
+  const on = game && !game.attract && game.state === 'play';
+  const h = on ? game.hud() : { threats: [] };
+  const pp = on ? game.g.pose(game.p) : null;
+  let nearest = Infinity, shown = 0;
+  for (const c of h.threats) {
+    const d = Math.hypot(c.x - pp.x, c.z - pp.z);
+    nearest = Math.min(nearest, d);
+    if (d > 70) continue;
+    tv.set(c.x, 2, c.z).project(game.camera);
+    const onScreen = tv.z < 1 && Math.abs(tv.x) < 0.92 && Math.abs(tv.y) < 0.9;
+    if (onScreen) continue;
+    // direction on screen; behind the camera flips
+    let sx = tv.x, sy = tv.y;
+    if (tv.z > 1) { sx = -sx; sy = -sy; }
+    const a = Math.atan2(-sy, sx);
+    const el = threatEls[shown] || (threatEls[shown] = Object.assign(document.createElement('div'), { className: 'threat' }));
+    if (!el.parentNode) box.appendChild(el);
+    const r = 0.42;
+    el.style.left = `${50 + Math.cos(a) * r * 100}%`;
+    el.style.top = `${50 + Math.sin(a) * r * 100}%`;
+    el.style.transform = `translate(-50%, -50%) rotate(${a}rad)`;
+    el.dataset.d = `${Math.round(d)}m`;
+    el.hidden = false;
+    shown++;
+  }
+  for (let i = shown; i < threatEls.length; i++) threatEls[i].hidden = true;
+  $('danger').style.opacity = on && nearest < 28 ? String(Math.min(1, (28 - nearest) / 18) * 0.9) : '0';
+}
 
 // ------------------------------------------------------------ minimap
 const mm = $('minimap');
@@ -290,6 +335,8 @@ function titleScreen(message = '') {
 }
 
 async function startWithPostcode(pc) {
+  playMode = 'postcode';
+  track('start', { mode: 'postcode' });
   audio.start();
   store.set('altnets-postcode', pc.toUpperCase());
   const steps = ['Finding your streets', 'Tracing the old copper', 'Locating the nearest nick', 'Putting the kettle on at the station'];
@@ -310,6 +357,8 @@ async function startWithPostcode(pc) {
 }
 
 async function startDemo() {
+  playMode = 'demo';
+  track('start', { mode: 'demo' });
   audio.start();
   if (!area || area.postcode !== 'EC4M 7EH') mountGame(await (await fetch('/areas/old-bailey.json')).json());
   else mountGame(area);
@@ -346,72 +395,118 @@ function wireShare(stats, text) {
   });
 }
 
-function overScreen() {
+// Where "Check fibre in my area" goes. Confirm the page with The Altnets; the
+// postcode and campaign tags ride along so they can prefill and attribute.
+const CTA_BASE = 'https://thealtnets.com/';
+function ctaUrl(pc) {
+  const q = new URLSearchParams({ utm_source: 'escape-the-coppers', utm_medium: 'game', utm_campaign: 'end-screen' });
+  if (pc) q.set('postcode', pc);
+  return `${CTA_BASE}?${q}`;
+}
+
+// funnel events, ready for GA4 or any tag manager
+function track(event, data = {}) {
+  try { (window.dataLayer = window.dataLayer || []).push({ event: `etc_${event}`, ...data }); } catch { /* ignore */ }
+}
+
+function copyText(text, btn) {
+  const fallback = () => {
+    const t = document.createElement('textarea');
+    t.value = text; t.setAttribute('readonly', ''); t.style.position = 'fixed'; t.style.opacity = '0';
+    document.body.appendChild(t); t.select();
+    try { document.execCommand('copy'); btn.textContent = 'Copied'; } catch { btn.textContent = 'Could not copy'; }
+    t.remove();
+  };
+  if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => { btn.textContent = 'Copied'; }).catch(fallback);
+  else fallback();
+}
+
+// The real-world line: gigabit coverage for the player's own postcode.
+async function fillReality(pc) {
+  const box = $('reality');
+  if (!box) return;
+  if (!pc) {
+    box.innerHTML = `<p class="reality-q">What can <b>your</b> street get?</p>
+      <form class="reality-form" id="realForm" novalidate><input id="realPc" autocomplete="postal-code" autocapitalize="characters" placeholder="Your postcode" maxlength="8" aria-label="Your postcode"><button class="btn" type="submit">Show me</button></form>`;
+    $('realForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const v = $('realPc').value.trim().toUpperCase();
+      if (!v) return;
+      store.set('altnets-postcode', v);
+      $('ctaBtn').href = ctaUrl(v);
+      fillReality(v);
+    });
+    return;
+  }
+  box.innerHTML = `<p class="reality-q">Checking ${esc(pc)}&hellip;</p>`;
+  let data = null;
+  try {
+    const res = await fetch('/api/fibre?postcode=' + encodeURIComponent(pc));
+    if (res.ok) data = await res.json();
+  } catch { /* offline: fall back */ }
+  if (!$('reality')) return;
+  if (data && data.gigabit != null) {
+    const g = Math.round(data.gigabit);
+    box.innerHTML = `<p class="reality-k">In real life at ${esc(data.postcode)}</p>
+      <p class="reality-big"><b>${g}%</b> of homes can get gigabit broadband</p>
+      <p class="reality-s">${g >= 50 ? 'Full fibre could already be on your street.' : 'Your street could be next.'} Source: ${esc(data.source)}.</p>`;
+  } else {
+    box.innerHTML = `<p class="reality-k">In real life</p><p class="reality-big">See what full fibre you can get at <b>${esc(pc)}</b></p>`;
+  }
+}
+
+// One end panel for every ending: caught, area connected, or quitting.
+function endScreen(kind) {
   const best = Math.max(game.score, Number(store.get('altnets-best') || 0));
   store.set('altnets-best', String(best));
-  const pct = Math.floor(game.g.coverage * 100);
-  const where = game.caughtOn ? ` on ${esc(game.caughtOn)}` : '';
-  const share = `I got ${pct}% of ${area.label} onto full fibre before ${game.caughtBy?.name || 'the coppers'} nicked me. Score ${game.score.toLocaleString('en-GB')}. Escape the Coppers at thealtnets.com`;
+  const pct = kind === 'clear' ? 100 : Math.floor(game.g.coverage * 100);
+  const mine = playMode === 'postcode' ? area.postcode : (store.get('altnets-postcode') || '');
+  const head = {
+    over: ['Game over', 'Nicked!', `${esc(game.caughtBy?.name || 'The coppers')} caught you${game.caughtOn ? ` on ${esc(game.caughtOn)}` : ''}.`],
+    clear: [`Round ${game.round} complete`, 'Connected!', `Every street in ${esc(area.label)} is on fibre. The coppers are calling for backup.`],
+    quit: ['Run over', 'Nice run', `You got ${pct}% of ${esc(area.label)} onto fibre.`],
+  }[kind];
+  const share = kind === 'clear'
+    ? `I connected every street in ${area.label} to full fibre and escaped the coppers. Score ${game.score.toLocaleString('en-GB')}. Can you connect your street? thealtnets.com`
+    : `I got ${pct}% of ${area.label} onto full fibre before ${game.caughtBy?.name || 'the coppers'} nicked me. Score ${game.score.toLocaleString('en-GB')}. Escape the Coppers at thealtnets.com`;
   showPlayUi(false);
   $('banner').hidden = true;
+  $('hint').hidden = true;
+  audio.setMusic(false);
+  track('end', { kind, pct, score: game.score, area: area.postcode });
   show(`
-  <div class="card narrow">
-    <p class="eyebrow">Game over</p>
-    <h2 class="big-title">Nicked!</h2>
-    <p class="story">${esc(game.caughtBy?.name || 'The coppers')} caught you${where}.</p>
+  <div class="card narrow end">
+    <p class="eyebrow">${head[0]}</p>
+    <h2 class="big-title${kind === 'clear' ? ' teal' : ''}">${head[1]}</h2>
+    <p class="story">${head[2]}</p>
     <div class="stats">
       <div><small>Score</small><b>${game.score.toLocaleString('en-GB')}</b></div>
-      <div><small>On fibre</small><b>${pct}%</b></div>
-      <div><small>Streets</small><b>${game.streetsDone}</b></div>
+      <div><small>In the game</small><b>${pct}%</b></div>
+      <div><small>Streets</small><b>${kind === 'clear' ? game.g.edges.length : game.streetsDone}</b></div>
     </div>
     <p class="best">${game.score >= best && game.score > 0 ? 'New personal best!' : `Your best: ${best.toLocaleString('en-GB')}`}</p>
-    <p class="tagline">${TAGLINES[Math.floor(Math.random() * TAGLINES.length)]}</p>
+    <div class="reality" id="reality"></div>
+    <a class="btn teal wide cta-main" id="ctaBtn" href="${ctaUrl(mine)}" target="_blank" rel="noopener">Check fibre in my area</a>
     <div class="actions">
-      <button class="btn teal" id="shareCard">Share my streets</button>
-      <button class="btn" id="again" data-autofocus>Run again</button>
+      ${kind === 'clear' ? '<button class="btn" id="next" data-autofocus>Keep running</button>' : '<button class="btn" id="again" data-autofocus>Run again</button>'}
+      <button class="btn ghost" id="shareCard">Share my streets</button>
     </div>
     <div class="share">
       <img class="card-preview" id="cardPreview" alt="Your share card" hidden>
       <div class="share-row"><button class="linkish" id="copy" type="button">Copy my score</button><button class="linkish" id="newPc" type="button">Try another postcode</button></div>
     </div>
-    <a class="cta" href="https://thealtnets.com" target="_blank" rel="noopener">Visit thealtnets.com &rarr;</a>
   </div>`);
-  $('again').addEventListener('click', () => { mountGame(area); play(); });
-  wireShare({ area, graph: game.g, score: game.score, pct, caughtBy: game.caughtBy?.name || null, cleared: false, round: game.round }, share);
-  $('copy').addEventListener('click', () => {
-    const btn = $('copy');
-    const fallback = () => {
-      const t = document.createElement('textarea');
-      t.value = share; t.setAttribute('readonly', ''); t.style.position = 'fixed'; t.style.opacity = '0';
-      document.body.appendChild(t); t.select();
-      try { document.execCommand('copy'); btn.textContent = 'Copied'; } catch { btn.textContent = 'Could not copy'; }
-      t.remove();
-    };
-    if (navigator.clipboard) navigator.clipboard.writeText(share).then(() => { btn.textContent = 'Copied'; }).catch(fallback);
-    else fallback();
-  });
+  fillReality(mine);
+  $('ctaBtn').addEventListener('click', () => track('cta', { kind, postcode: mine || null }));
+  $('again')?.addEventListener('click', () => { mountGame(area); play(); });
+  $('next')?.addEventListener('click', () => { hide(); showPlayUi(true); game.nextRound(); });
+  $('newPc').addEventListener('click', () => titleScreen());
+  $('copy').addEventListener('click', () => copyText(share, $('copy')));
+  wireShare({ area, graph: game.g, score: game.score, pct, caughtBy: kind === 'over' ? game.caughtBy?.name || null : null, cleared: kind === 'clear', round: game.round }, share);
+  $('shareCard').addEventListener('click', () => track('share', { kind }));
 }
-
-function clearScreen() {
-  showPlayUi(false);
-  $('banner').hidden = true;
-  show(`
-  <div class="card narrow">
-    <p class="eyebrow">Round ${game.round} complete</p>
-    <h2 class="big-title teal">${esc(area.label)} is on full fibre</h2>
-    <p class="story">Every street connected. The copper's gone. Round ${game.round + 1}: they've called for backup, and they're quicker.</p>
-    <div class="stats">
-      <div><small>Score</small><b>${game.score.toLocaleString('en-GB')}</b></div>
-      <div><small>Streets</small><b>${game.g.edges.length}</b></div>
-      <div><small>Laid</small><b>${(game.g.total / 1000).toFixed(1)}km</b></div>
-    </div>
-    <div class="actions"><button class="btn teal" id="next" data-autofocus>Keep running</button><button class="btn ghost" id="shareCard">Share my streets</button></div>
-    <div class="share"><img class="card-preview" id="cardPreview" alt="Your share card" hidden></div>
-  </div>`);
-  wireShare({ area, graph: game.g, score: game.score, pct: 100, caughtBy: null, cleared: true, round: game.round },
-    `I connected every street in ${area.label} to full fibre and escaped the coppers. Score ${game.score.toLocaleString('en-GB')}. Can you connect your street? thealtnets.com`);
-  $('next').addEventListener('click', () => { hide(); showPlayUi(true); game.nextRound(); });
-}
+const overScreen = () => endScreen('over');
+const clearScreen = () => endScreen('clear');
 
 function pauseScreen() {
   paused = true;
@@ -425,7 +520,7 @@ function pauseScreen() {
       <button class="btn teal wide" id="resume" data-autofocus>Keep running</button>
       <button class="btn ghost wide" id="soundToggle">${audio.isMuted() ? 'Sound: off' : 'Sound: on'}</button>
       <button class="btn ghost wide" id="restart">Start this area again</button>
-      <button class="linkish" id="quit">Quit to the start</button>
+      <button class="linkish" id="quit">End this run</button>
     </div>
     <ul class="how compact">
       <li class="keys-only"><kbd>&larr;</kbd><kbd>&rarr;</kbd> turn</li>
@@ -438,7 +533,7 @@ function pauseScreen() {
   $('resume').addEventListener('click', resume);
   $('soundToggle').addEventListener('click', () => { toggleMute(); $('soundToggle').textContent = audio.isMuted() ? 'Sound: off' : 'Sound: on'; });
   $('restart').addEventListener('click', () => { paused = false; mountGame(area); play(); });
-  $('quit').addEventListener('click', () => { paused = false; titleScreen(); });
+  $('quit').addEventListener('click', () => { paused = false; endScreen('quit'); });
 }
 
 function resume() { hide(); paused = false; if (game.state === 'play') audio.setMusic(true); }
@@ -552,7 +647,10 @@ function frame(now) {
   last = now;
   if (game) {
     if (!paused) {
-      acc += dt;
+      // a short slow-motion beat when you're caught
+      const scale = game.slowmo > 0 ? 0.3 : 1;
+      if (game.slowmo > 0) game.slowmo -= dt;
+      acc += dt * scale;
       while (acc >= STEP) { game.update(STEP); acc -= STEP; }
     } else acc = 0;
     game.sync(dt, now / 1000);
@@ -560,6 +658,7 @@ function frame(now) {
     composer.render();
     tuneResolution(dt);
     updateHud();
+    drawThreats();
     drawMinimap();
   }
   requestAnimationFrame(frame);

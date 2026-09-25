@@ -28,9 +28,9 @@ const WIDE_R = 1800;
 // WIDE_R. Measured Sep 2026: places that play at 450m had 15 to 23 km, places
 // that needed the wide fetch about 5 km.
 const SPARSE_LEN = 10000;
-const TARGET_LEN = 2300; // metres of street in one level
+const TARGET_LEN = 1500; // metres of street in one level: about 2 minutes of play
 const MERGE_DIST = 10; // junctions closer than this become one
-const STUB_LEN = 35; // dead ends shorter than this are removed
+const STUB_LEN = 120; // dead ends shorter than this are removed, so U-turns are rare
 
 export class AreaError extends Error {
   constructor(message, status = 400) { super(message); this.status = status; }

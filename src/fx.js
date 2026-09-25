@@ -116,3 +116,39 @@ export function makeBubble() {
     hide() { sprite.visible = false; },
   };
 }
+
+// Junction signpost: arrow plus the real street name, floating over each exit.
+export function makeSign() {
+  const W = 640, H = 150;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, fog: false }));
+  sprite.scale.set(8.8, 8.8 * (H / W), 1);
+  sprite.renderOrder = 9;
+  sprite.visible = false;
+  let last = '';
+  return {
+    sprite,
+    set(arrow, name, chosen, turning) {
+      const key = arrow + name + chosen + turning;
+      if (key === last) return;
+      last = key;
+      const x = c.getContext('2d');
+      x.clearRect(0, 0, W, H);
+      x.fillStyle = chosen ? (turning ? '#f6c521' : '#f4f3ef') : 'rgba(15,20,20,0.72)';
+      x.beginPath(); x.roundRect(6, 6, W - 12, H - 12, 34); x.fill();
+      x.fillStyle = chosen ? '#0f1414' : '#eaf6f5';
+      x.textBaseline = 'middle';
+      x.font = '900 86px Outfit, system-ui, sans-serif';
+      x.textAlign = 'left';
+      x.fillText(arrow, 30, H / 2 + 4);
+      let fs = 50;
+      do { x.font = `800 ${fs}px Outfit, system-ui, sans-serif`; fs -= 3; } while (x.measureText(name).width > W - 150 && fs > 24);
+      x.fillText(name, 120, H / 2 + 2);
+      tex.needsUpdate = true;
+      sprite.material.opacity = chosen ? 1 : 0.85;
+    },
+  };
+}

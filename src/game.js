@@ -5,7 +5,7 @@ import { Graph, advance, wrap } from './graph.js';
 import { buildWorld, roadWidth, COLOURS } from './world.js';
 import { makeRunner, makeCopper, makeSwitchOff, makeGigabit, makeHurdle, makeBlueLamp } from './actors.js';
 import { sfx, updateSiren, speak } from './audio.js';
-import { Sparks, makeBubble, TAUNTS, SCARED } from './fx.js';
+import { Sparks, makeBubble, makeSign, TAUNTS, SCARED } from './fx.js';
 
 export const COPS = [
   { name: 'Sgt Dial-Up', kind: 'chase', tint: 0xd2753a, wait: 1.2 },
@@ -46,6 +46,19 @@ export class Game {
       c.view.group.add(c.bubble.sprite);
     });
     this.sparks = new Sparks(this.scene);
+    this.signs = [0, 1, 2, 3, 4].map(() => {
+      const s = makeSign();
+      this.scene.add(s.sprite);
+      return s;
+    });
+    // beam over the nearest street still on copper, once you're nearly done
+    const beamGeo = new THREE.CylinderGeometry(1.2, 2.2, 60, 16, 1, true);
+    beamGeo.translate(0, 30, 0);
+    this.finderBeam = new THREE.Mesh(beamGeo, new THREE.MeshBasicMaterial({ color: COLOURS.fibre, transparent: true, opacity: 0.28, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false }));
+    this.finderBeam.visible = false;
+    this.scene.add(this.finderBeam);
+    this.finder = null;
+    this.finderT = 0;
     // arrows painted on the road showing which way you'll go at the next junction
     const arrow = new THREE.Shape();
     [[0, 1.2], [1.2, -0.1], [0.6, -0.1], [0, 0.5], [-0.6, -0.1], [-1.2, -0.1]].forEach(([x, y], i) => (i ? arrow.lineTo(x, y) : arrow.moveTo(x, y)));
@@ -184,6 +197,7 @@ export class Game {
     this.streak = 0;
     this.streakT = 0;
     this.mult = 1;
+    this.grace = 2; // seconds of safety after every (re)start
     this.modeIdx = 0;
     this.modeT = 0;
     this.fright = 0;
@@ -285,6 +299,8 @@ export class Game {
     this.updateCops(dt);
     this.updateHurdles(dt);
     this.updatePickups(dt);
+    this.updateFinder(dt);
+    if (this.grace > 0) this.grace -= dt;
     this.checkCops();
   }
 
@@ -339,20 +355,54 @@ export class Game {
     if (this.g.laidCount === this.g.totalCells) this.levelClear();
   }
 
+  // Which exit the runner will take at a junction. Shared by the runner and the
+  // signposts, so what the signs show is always what happens.
+  planExit(node, opts) {
+    const g = this.g, P = this.p;
+    if (!opts.length) return { pick: null, turning: false };
+    if (P.buf) {
+      const pick = g.choose(opts, P.buf);
+      if (pick) return { pick, turning: true };
+    }
+    const ahead = opts.filter((o) => Math.abs(o.rel) < 0.55);
+    if (ahead.length || opts.length === 1) return { pick: g.choose(opts, null), turning: false };
+    // T-junction with no press: head for the nearest unlaid fibre
+    let best = opts[0], bv = Infinity;
+    for (const o of opts) {
+      const v = this.unlaidDistance(o);
+      if (v < bv) { bv = v; best = o; }
+    }
+    return { pick: best, turning: false };
+  }
+
+  // path distance from taking exit o to the nearest street that still needs fibre
+  unlaidDistance(o) {
+    const g = this.g;
+    if (g.laid[o.edge].some((c) => !c)) return 0;
+    const far = this.farNode(o);
+    const dist = g.distancesTo(far);
+    let best = Infinity;
+    for (const e of g.edges) {
+      if (!g.laid[e.i].some((c) => !c)) continue;
+      best = Math.min(best, dist[e.a], dist[e.b]);
+    }
+    return g.edges[o.edge].len + best;
+  }
+
   playerAtNode(m, node, inH) {
     const g = this.g, P = this.p;
     const e = g.edges[m.edge];
     this.layAt(m.edge, m.dir === 1 ? e.len - 0.01 : 0.01);
     const opts = g.options(node, m, inH);
-    let pick = null;
-    if (P.buf) {
-      pick = g.choose(opts, P.buf);
-      if (pick || opts.length >= 2) P.buf = null;
-    }
-    if (!pick) pick = g.choose(opts, null);
+    const { pick, turning } = this.planExit(node, opts);
+    if (turning || opts.length >= 2) P.buf = null;
     P.last = { node, inH, edge: m.edge, dir: m.dir };
     P.since = 0;
-    if (!pick) { m.dir = -m.dir; return; } // dead end: turn round
+    if (!pick) { // dead end: turn round, and say so
+      m.dir = -m.dir;
+      this.emit('pop', { text: 'Dead end! Turning round', tone: 'orange' });
+      return;
+    }
     m.edge = pick.edge;
     m.dir = pick.dir;
   }
@@ -503,6 +553,7 @@ export class Game {
       const d = Math.hypot(pp.x - cp.x, pp.z - cp.z);
       if (c.mode === 'active') nearest = Math.min(nearest, d);
       if (d > CATCH) continue;
+      if (c.mode === 'active' && this.grace > 0) continue;
       if (c.mode === 'fright') {
         this.combo++;
         const pts = 200 * 2 ** (this.combo - 1);
@@ -520,6 +571,7 @@ export class Game {
         this.caughtOn = this.g.edges[this.p.edge].name;
         this.state = 'dying';
         this.dyingT = 1.8;
+        this.slowmo = 0.45; // a short slow-motion beat so every catch reads
         this.shake = 1.3;
         speak('gotcha', 0, true);
         this.streak = 0;
@@ -621,6 +673,35 @@ export class Game {
     });
   }
 
+  // nearest street still on copper, by path, once the area is 85% done
+  updateFinder(dt) {
+    this.finderT -= dt;
+    if (this.finderT > 0) return;
+    this.finderT = 0.5;
+    const g = this.g;
+    if (g.coverage < 0.85) { this.finder = null; this.finderBeam.visible = false; return; }
+    const P = this.p, pe = g.edges[P.edge];
+    const pd = P.dir === 1 ? P.s : pe.len - P.s;
+    const dist = g.distancesTo(g.endNode(P));
+    const toEnd = pe.len - P.s;
+    let best = null;
+    for (const e of g.edges) {
+      const laid = g.laid[e.i];
+      for (let c = 0; c < e.cells; c++) {
+        if (laid[c]) continue;
+        const d = (c + 0.5) * e.cellLen;
+        let v = Math.min(toEnd + dist[e.a] + d, toEnd + dist[e.b] + (e.len - d));
+        if (e.i === P.edge) v = Math.abs(d - pd);
+        if (!best || v < best.v) best = { v, e, d };
+      }
+    }
+    if (!best) { this.finder = null; this.finderBeam.visible = false; return; }
+    const p = g.pointAt(best.e, best.d);
+    this.finder = { x: p.x, z: p.z, dist: Math.round(best.v), name: best.e.name };
+    this.finderBeam.position.set(p.x, 0, p.z);
+    this.finderBeam.visible = true;
+  }
+
   levelClear() {
     this.state = 'clear';
     this.score += 1000 + this.lives * 250;
@@ -685,6 +766,7 @@ export class Game {
       }
     }
     R.mat.color.setScalar(P.boost > 0 && Math.floor(t * 12) % 2 ? 1.6 : 1);
+    R.group.visible = !(this.grace > 0 && this.state === 'play' && Math.floor(t * 10) % 2);
 
     this.cops.forEach((c, i) => {
       const v = c.view;
@@ -742,16 +824,26 @@ export class Game {
 
   syncChevrons(t) {
     const g = this.g, P = this.p;
-    const hide = () => this.chevrons.forEach((c) => { c.visible = false; });
+    const hide = () => { this.chevrons.forEach((c) => { c.visible = false; }); this.signs.forEach((s) => { s.sprite.visible = false; }); };
     if (this.state !== 'play' && this.state !== 'ready') return hide();
     const e = g.edges[P.edge];
-    if (e.len - P.s > 60) return hide();
+    if (e.len - P.s > 55) return hide();
     const node = g.endNode(P);
     const opts = g.options(node, P, g.arriveHeading(P));
     if (opts.length < 2) return hide();
-    let pick = P.buf ? g.choose(opts, P.buf) : null;
-    const turning = !!pick;
-    if (!pick) pick = g.choose(opts, null);
+    const { pick, turning } = this.planExit(node, opts);
+    // signposts over each exit: arrow and real street name, the chosen one lit
+    const n = g.nodes[node];
+    this.signs.forEach((s, i) => {
+      const o = opts[i];
+      if (!o) { s.sprite.visible = false; return; }
+      const h = g.leaveHeading(o);
+      const chosen = o.edge === pick.edge && o.dir === pick.dir;
+      const arrow = Math.abs(o.rel) < 0.55 ? '\u2191' : o.rel < 0 ? '\u2190' : '\u2192';
+      s.set(arrow, g.edges[o.edge].name || 'Back lane', chosen, turning);
+      s.sprite.position.set(n.x + Math.sin(h) * 6.5, 4.4 + (chosen ? Math.sin(t * 6) * 0.15 : 0), n.z - Math.cos(h) * 6.5);
+      s.sprite.visible = true;
+    });
     const pe = g.edges[pick.edge];
     this.chevrons.forEach((c, i) => {
       const di = 3.5 + i * 4.2;
@@ -810,9 +902,9 @@ export class Game {
     const fx = Math.sin(this.camH), fz = -Math.cos(this.camH);
     // the camera rides the runner's own path, so it stays in the street round corners
     this.addTrail(pp);
-    const back = this.behind(pp, this.camBack || 9.5);
-    const want = new THREE.Vector3(back.x, this.camUp || 5.2, back.z);
-    const look = new THREE.Vector3(pp.x + fx * 8, 2.2, pp.z + fz * 8);
+    const back = this.behind(pp, this.camBack || 11);
+    const want = new THREE.Vector3(back.x, this.camUp || 6.6, back.z);
+    const look = new THREE.Vector3(pp.x + fx * 12, 1.4, pp.z + fz * 12);
     if (this.state === 'ready' && this.intro && this.reducedMotion) this.readyT = Math.min(this.readyT, 1.2);
     if (this.state === 'ready' && this.intro && !this.reducedMotion) {
       // swoop down from above the whole area onto the runner
@@ -855,6 +947,8 @@ export class Game {
       boost: P.boost,
       mult: this.mult,
       streets: this.streetsDone,
+      finder: this.finder,
+      threats: this.cops.filter((c) => c.mode === 'active' && c.m).map((c) => { const p = g.pose(c.m); return { x: p.x, z: p.z, name: c.name }; }),
     };
   }
 }

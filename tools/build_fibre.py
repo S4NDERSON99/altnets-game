@@ -1,6 +1,11 @@
 """Bake Ofcom Connected Nations fixed coverage postcode data for the end screen.
 
-Usage: python3 tools/build_fibre.py <ofcom-postcode-download.zip or folder or .csv> [out_dir]
+Usage: python3 tools/build_fibre.py <homes source> [all-premises source] [--out out_dir]
+
+Sources are a zip, folder or .csv of Ofcom postcode unit files. Homes
+(residential) figures win; the all-premises file fills postcodes with no homes
+(offices, courts). A postcode that is 0% for everything carries no real data
+and is left out, so the game shows its plain "check your postcode" message.
 
 Ofcom publishes postcode unit files (CSV, one or more per area) under the Open
 Government Licence. Column names change a little between releases, so this
@@ -17,8 +22,13 @@ import sys
 import zipfile
 from collections import defaultdict
 
-SRC = sys.argv[1]
-OUT = sys.argv[2] if len(sys.argv) > 2 else '.data/fibre'
+args = sys.argv[1:]
+OUT = '.data/fibre'
+if '--out' in args:
+    i = args.index('--out')
+    OUT = args[i + 1]
+    del args[i:i + 2]
+SOURCES = args
 SOURCE = 'Ofcom Connected Nations'
 
 
@@ -54,33 +64,35 @@ def csv_streams(src):
 
 out = defaultdict(dict)
 rows = 0
-for name, fh in csv_streams(SRC):
-    reader = csv.DictReader(fh)
-    cols = reader.fieldnames or []
-    c_pc = pick(cols, 'postcode', avoid=('area', 'district', 'sector')) or pick(cols, 'pcds')
-    c_gig = pick(cols, 'gigabit', '%') or pick(cols, 'gigabit', 'availability')
-    c_sfb = pick(cols, 'sfbb', '%') or pick(cols, 'superfast', '%')
-    c_all = pick(cols, 'all premises') or pick(cols, 'premises', avoid=('%',))
-    if not c_pc or not c_gig:
-        print(f'skip {name}: no postcode or gigabit column ({cols[:8]}...)')
-        continue
-    for r in reader:
-        pc = re.sub(r'\s+', '', (r.get(c_pc) or '').upper())
-        g = num(r.get(c_gig, ''))
-        if len(pc) < 5 or g is None:
+for rank, src in enumerate(SOURCES):
+    homes = rank == 0
+    for name, fh in csv_streams(src):
+        reader = csv.DictReader(fh)
+        cols = reader.fieldnames or []
+        c_pc = pick(cols, 'postcode', avoid=('area', 'district', 'sector', 'space')) or pick(cols, 'pcds')
+        c_gig = pick(cols, 'gigabit', '%') or pick(cols, 'gigabit', 'availability')
+        c_sfb = pick(cols, 'sfbb', '%') or pick(cols, 'superfast', '%')
+        if not c_pc or not c_gig:
+            print(f'skip {name}: no postcode or gigabit column ({cols[:8]}...)')
             continue
-        rec = {'g': g}
-        if c_sfb:
-            s = num(r.get(c_sfb, ''))
+        for r in reader:
+            pc = re.sub(r'\s+', '', (r.get(c_pc) or '').upper())
+            g = num(r.get(c_gig, ''))
+            s = num(r.get(c_sfb, '')) if c_sfb else None
+            if len(pc) < 5 or g is None:
+                continue
+            if g == 0 and not s:
+                continue  # 0% for everything: no real data here
+            if pc in out[pc[:-3]]:
+                continue  # homes figure already there
+            rec = {'g': g}
             if s is not None:
                 rec['s'] = s
-        if c_all:
-            p = num(r.get(c_all, ''))
-            if p is not None:
-                rec['p'] = int(p)
-        out[pc[:-3]][pc] = rec
-        rows += 1
-    print(f'{name}: using {c_pc!r}, {c_gig!r}, {c_sfb!r}, {c_all!r}')
+            if homes:
+                rec['h'] = 1
+            out[pc[:-3]][pc] = rec
+            rows += 1
+    print(f'{src}: done ({"homes" if homes else "all premises"})')
 
 os.makedirs(OUT, exist_ok=True)
 for outcode, pcs in out.items():

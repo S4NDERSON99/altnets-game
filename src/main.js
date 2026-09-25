@@ -448,8 +448,8 @@ async function fillReality(pc) {
   if (data && data.gigabit != null) {
     const g = Math.round(data.gigabit);
     box.innerHTML = `<p class="reality-k">In real life at ${esc(data.postcode)}</p>
-      <p class="reality-big"><b>${g}%</b> of homes can get gigabit broadband</p>
-      <p class="reality-s">${g >= 50 ? 'Full fibre could already be on your street.' : 'Your street could be next.'} Source: ${esc(data.source)}.</p>`;
+      <p class="reality-big"><b>${g}%</b> of ${data.homes ? 'homes' : 'premises'} can get gigabit broadband</p>
+      <p class="reality-s">${g >= 50 ? 'Gigabit broadband could already reach your street.' : 'Your street could be next.'} Source: ${esc(data.source)}.</p>`;
   } else {
     box.innerHTML = `<p class="reality-k">In real life</p><p class="reality-big">See what full fibre you can get at <b>${esc(pc)}</b></p>`;
   }

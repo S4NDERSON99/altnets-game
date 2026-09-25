@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "bake": "node server/bake.js",
-    "upload-tiles": "node tools/upload_tiles.mjs"
+    "upload-tiles": "node tools/upload_tiles.mjs",
+    "upload-fibre": "node tools/upload_tiles.mjs --fibre"
   },
   "dependencies": {
     "three": "^0.169.0"

@@ -27,7 +27,10 @@ const CONCURRENCY = 32;
 const RETRIES = 3;
 const PROGRESS_EVERY = 5000;
 
-const TILES_DIR = fileURLToPath(new URL('../.data/tiles', import.meta.url));
+// --fibre uploads the Ofcom coverage files (.data/fibre) under fibre/ instead
+const FIBRE = process.argv.includes('--fibre');
+const TILES_DIR = fileURLToPath(new URL(FIBRE ? '../.data/fibre' : '../.data/tiles', import.meta.url));
+const PREFIX = FIBRE ? 'fibre/' : '';
 
 function config() {
   const bucket = process.env.R2_BUCKET || process.env.S3_BUCKET;
@@ -143,7 +146,7 @@ async function main() {
   const cfg = config();
   console.log(`Uploading to bucket "${cfg.bucket}" with concurrency ${CONCURRENCY}...`);
   const t0 = Date.now();
-  const counts = await runPool(files, CONCURRENCY, (f) => uploadOne(cfg.client, cfg.bucket, f.rel, f.abs));
+  const counts = await runPool(files, CONCURRENCY, (f) => uploadOne(cfg.client, cfg.bucket, PREFIX + f.rel, f.abs));
   const secs = ((Date.now() - t0) / 1000).toFixed(1);
   console.log(`Done in ${secs}s: ${counts.uploaded} uploaded, ${counts.skipped} already there, ${counts.failed} failed.`);
   if (counts.failed) {

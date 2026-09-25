@@ -39,7 +39,7 @@ export async function getFibre(postcodeRaw) {
     postcode: pc,
     gigabit: row.g, // % of premises that can get gigabit-capable broadband
     superfast: row.s ?? null, // % that can get 30Mbit/s or more
-    premises: row.p ?? null,
+    homes: row.h === 1, // figure is for homes, otherwise for all premises
     source: file.source || 'Ofcom Connected Nations',
   };
 }

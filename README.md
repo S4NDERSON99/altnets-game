@@ -42,6 +42,16 @@ This takes about 35 minutes on a laptop. It gives about 257,000 gzipped JSON til
 
 For hosting, upload `.data/tiles/` to any static file host (S3, R2, Vercel Blob) and set `TILES_URL` to its base URL. Without it, `TILES_DIR` or `.data/tiles` is read from disk.
 
+## Real-world coverage on the end screen
+
+The end panel shows the share of homes at the player's postcode that can get gigabit broadband, from Ofcom Connected Nations (July 2025 data, Open Government Licence). Ofcom no longer publishes full fibre by postcode, so gigabit is the figure used. To refresh it when Ofcom publishes a new release, download the fixed coverage zip from Ofcom's Connected Nations data downloads page, unzip the postcode file inside it, and run:
+
+```bash
+python3 tools/build_fibre.py <postcode_res_files folder> <postcode_files folder>
+```
+
+Homes figures are used where they exist; the all-premises file fills in postcodes with no homes. Output goes to `.data/fibre/`, one file per outward code.
+
 ## Other scripts
 
 - `npm run bake` rebuilds the Old Bailey default map.
@@ -71,7 +81,12 @@ The game runs on Vercel: the `dist/` build is served as a static site, and one s
 
 3. **Create the Vercel project.** In the Vercel dashboard, "Add New… → Project", import this repository. Vercel will read `vercel.json` and pick up the build command and output folder automatically, no need to change the framework preset.
 
-4. **Set the tiles URL.** In the Vercel project's Settings → Environment Variables, add `TILES_URL` set to the public bucket URL from step 1 (no trailing slash, e.g. `https://pub-xxxx.r2.dev`). This is what tells the deployed game to read map tiles from the bucket instead of local disk.
+   Then upload the fibre coverage files the same way (about 64MB, into a `fibre/` folder in the same bucket):
+   ```bash
+   npm run upload-fibre
+   ```
+
+4. **Set the tiles URL.** In the Vercel project's Settings → Environment Variables, add `TILES_URL` set to the public bucket URL from step 1 (no trailing slash, e.g. `https://pub-xxxx.r2.dev`). This is what tells the deployed game to read map tiles from the bucket instead of local disk. Also add `FIBRE_URL` set to the same address followed by `/fibre` (e.g. `https://pub-xxxx.r2.dev/fibre`), so the end screen can show real coverage for each postcode.
 
 5. **Deploy.** Trigger a deploy (push to the connected branch, or "Deploy" in the dashboard). Once it's live, try a postcode to check the map loads.
 

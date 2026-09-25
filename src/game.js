@@ -218,6 +218,7 @@ export class Game {
 
   begin() {
     this.attract = false;
+    this.outro = false;
     this.state = 'ready';
     this.readyT = INTRO;
     this.intro = true;
@@ -286,7 +287,7 @@ export class Game {
       this.dyingT -= dt;
       if (this.dyingT <= 0) {
         this.lives--;
-        if (this.lives <= 0) { this.state = 'over'; this.emit('over'); }
+        if (this.lives <= 0) { this.state = 'over'; this.startOutro(); this.emit('over'); }
         else { this.resetActors(); this.state = 'ready'; this.readyReason = 'respawn'; }
       }
       return;
@@ -702,8 +703,28 @@ export class Game {
     this.finderBeam.visible = true;
   }
 
+  startOutro() {
+    this.outro = true;
+    this.outroT0 = this.time;
+    const pp = this.g.pose(this.p);
+    this.outroA = pp.h + Math.PI;
+  }
+
+  // a fresh run on the same streets, without rebuilding the city
+  resetRun() {
+    this.round = 1;
+    this.score = 0;
+    this.lives = 3;
+    this.outro = false;
+    this.slowmo = 0;
+    this.resetRound();
+    this.resetActors();
+    this.state = 'title';
+  }
+
   levelClear() {
     this.state = 'clear';
+    this.startOutro();
     this.score += 1000 + this.lives * 250;
     updateSiren(Infinity, this.time);
     sfx.win();
@@ -711,6 +732,7 @@ export class Game {
   }
 
   nextRound() {
+    this.outro = false;
     this.round++;
     this.resetRound();
     this.resetActors();
@@ -826,6 +848,7 @@ export class Game {
     const g = this.g, P = this.p;
     const hide = () => { this.chevrons.forEach((c) => { c.visible = false; }); this.signs.forEach((s) => { s.sprite.visible = false; }); };
     if (this.state !== 'play' && this.state !== 'ready') return hide();
+    if (this.state === 'ready' && this.intro) return hide(); // not during the opening camera move
     const e = g.edges[P.edge];
     if (e.len - P.s > 55) return hide();
     const node = g.endNode(P);
@@ -842,7 +865,8 @@ export class Game {
       const arrow = Math.abs(o.rel) < 0.55 ? '\u2191' : o.rel < 0 ? '\u2190' : '\u2192';
       s.set(arrow, g.edges[o.edge].name || 'Back lane', chosen, turning);
       s.sprite.position.set(n.x + Math.sin(h) * 6.5, 4.4 + (chosen ? Math.sin(t * 6) * 0.15 : 0), n.z - Math.cos(h) * 6.5);
-      s.sprite.visible = true;
+      // a sign right in front of the lens is just a blur, so skip it
+      s.sprite.visible = s.sprite.position.distanceTo(this.camera.position) > 9;
     });
     const pe = g.edges[pick.edge];
     this.chevrons.forEach((c, i) => {
@@ -892,10 +916,32 @@ export class Game {
 
   syncCamera(dt, t, pp) {
     const cam = this.camera;
+    const ease = (k) => (k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2);
+    const aroundRunner = (ang, dist, height) => new THREE.Vector3(pp.x + Math.sin(ang) * dist, height, pp.z - Math.cos(ang) * dist);
     if (this.attract) {
-      const r = this.area.radius * 0.9;
-      cam.position.set(Math.cos(t * 0.08) * r, this.area.radius * 0.55, Math.sin(t * 0.08) * r);
-      cam.lookAt(0, 0, 0);
+      // title: stand in the street facing the mascot, with a gentle drift
+      const ang = pp.h + Math.sin(t * 0.35) * 0.25;
+      const sh = this.frameShift || { side: 0, up: 0, dist: 8.5 };
+      // slide camera and target together so the mascot sits in the open part
+      // of the screen, clear of the side panel, still facing us
+      const rx = -Math.cos(ang) * sh.side, rz = -Math.sin(ang) * sh.side;
+      const want = aroundRunner(ang, sh.dist || 8.5, 3.2 + Math.sin(t * 0.5) * 0.2);
+      want.x += rx; want.z += rz;
+      cam.position.lerp(want, 1 - Math.exp(-dt * 2));
+      const target = new THREE.Vector3(pp.x + rx, 2.3 + sh.up, pp.z + rz);
+      this.camLook = (this.camLook || target.clone()).lerp(target, 1 - Math.exp(-dt * 3));
+      cam.lookAt(this.camLook);
+      this.camH = pp.h;
+      return;
+    }
+    if (this.outro) {
+      // ending: rise above the area so your glowing fibre fills the frame
+      const R = this.area.radius;
+      const a = (this.time - this.outroT0) * 0.12 + this.outroA;
+      const want = new THREE.Vector3(pp.x * 0.5 + Math.sin(a) * R * 0.55, R * 0.85, pp.z * 0.5 - Math.cos(a) * R * 0.55);
+      cam.position.lerp(want, 1 - Math.exp(-dt * 1.4));
+      this.camLook = (this.camLook || new THREE.Vector3()).lerp(new THREE.Vector3(pp.x * 0.5, 0, pp.z * 0.5), 1 - Math.exp(-dt * 1.6));
+      cam.lookAt(this.camLook);
       return;
     }
     this.camH = lerpAngle(this.camH, pp.h, 1 - Math.exp(-dt * 4.5));
@@ -907,13 +953,13 @@ export class Game {
     const look = new THREE.Vector3(pp.x + fx * 12, 1.4, pp.z + fz * 12);
     if (this.state === 'ready' && this.intro && this.reducedMotion) this.readyT = Math.min(this.readyT, 1.2);
     if (this.state === 'ready' && this.intro && !this.reducedMotion) {
-      // swoop down from above the whole area onto the runner
+      // one continuous move: from facing the mascot round to the chase view
       const k = 1 - Math.max(0, this.readyT) / INTRO;
-      const e = k < 0.25 ? 0 : 1 - Math.pow(1 - (k - 0.25) / 0.75, 3);
-      const R = this.area.radius;
-      const high = new THREE.Vector3(pp.x * 0.4 - fx * R * 0.5, R * 1.25, pp.z * 0.4 - fz * R * 0.5);
-      cam.position.lerpVectors(high, want, e);
-      cam.lookAt(new THREE.Vector3(pp.x * 0.6, 0, pp.z * 0.6).lerp(look, e));
+      const e = ease(Math.min(1, k * 1.15));
+      const pos = aroundRunner(pp.h + Math.PI * e, 8.5 + ((this.camBack || 11) - 8.5) * e, 3.2 + ((this.camUp || 6.6) - 3.2) * e);
+      cam.position.lerp(pos, 1 - Math.exp(-dt * 12));
+      this.camLook = new THREE.Vector3(pp.x, 2.3, pp.z).lerp(look, e);
+      cam.lookAt(this.camLook);
     } else {
       cam.position.lerp(want, 1 - Math.exp(-dt * (this.state === 'ready' ? 2.5 : 10)));
       cam.lookAt(look);

@@ -82,11 +82,22 @@ function addHoodieBack(mesh) {
   mesh.add(decal);
 }
 
+// the mascot file is fetched once per visit and copied for every new area
+let mascotLoad = null;
+function mascotGltf() {
+  if (!mascotLoad) {
+    const loader = new GLTFLoader();
+    loader.setMeshoptDecoder(MeshoptDecoder);
+    mascotLoad = loader.loadAsync('/models/altnet.glb');
+  }
+  return mascotLoad;
+}
+export const preloadModels = () => { mascotGltf().catch(() => {}); };
+
 function loadModel(runner) {
-  const loader = new GLTFLoader();
-  loader.setMeshoptDecoder(MeshoptDecoder);
-  loader.load('/models/altnet.glb', (gltf) => {
-    const model = gltf.scene;
+  mascotGltf().then((gltf) => {
+    const model = gltf.scene.clone(true);
+    model.traverse((o) => { if (o.isMesh && o.material) o.material = o.material.clone(); });
     const box = new THREE.Box3().setFromObject(model);
     const size = box.getSize(new THREE.Vector3());
     const s = (runner.height * 0.92) / size.y;
@@ -122,7 +133,7 @@ function loadModel(runner) {
       run.play();
       runner.run = run;
     }
-  }, undefined, () => { /* keep the cut-out */ });
+  }).catch(() => { /* keep the cut-out */ });
 }
 
 function mat(color, extra = {}) {

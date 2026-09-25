@@ -76,6 +76,7 @@ function resize() {
   if (game) {
     game.camera.aspect = w / h;
     game.baseFov = game.camera.fov = w < h ? 70 : 62;
+    game.frameShift = w < 720 ? { side: 0, up: -3.4, dist: 12 } : { side: 3.4, up: 0, dist: 9.5 };
     game.camBack = w < h ? 9.5 : 11;
     game.camUp = w < h ? 6.0 : 6.6;
     game.reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -272,7 +273,10 @@ function drawMinimap() {
 // ------------------------------------------------------------ screens
 const screen = $('screen');
 
-function show(html) {
+// variant: 'side' docks the panel beside the live world (a bottom sheet on
+// phones); 'center' is for small interruptions like pause.
+function show(html, variant = 'center') {
+  screen.className = `screen ${variant}`;
   screen.innerHTML = html;
   screen.hidden = false;
   const first = screen.querySelector('[data-autofocus]');
@@ -285,13 +289,15 @@ function titleScreen(message = '') {
   $('banner').hidden = true;
   $('hint').hidden = true;
   audio.setMusic(false);
-  if (game) { game.attract = true; game.state = 'title'; }
+  if (game) {
+    if (game.state !== 'title') game.resetRun();
+    game.attract = true;
+  }
   const last = store.get('altnets-postcode') || '';
   const best = Number(store.get('altnets-best') || 0);
   show(`
-  <div class="card">
-    <div class="title-grid">
-      <figure class="hero-card"><img src="/sprites/altnet-hero.jpg" alt="The Altnets mascot: a teal furry character with network cables for hair, sunglasses and a black hoodie, giving a thumbs up"></figure>
+  <div class="card panel title">
+    <div>
       <div>
         <p class="eyebrow">Alternative routes. A brighter tomorrow.</p>
         <div class="wordmark"><span>The</span>Altnets</div>
@@ -318,7 +324,7 @@ function titleScreen(message = '') {
         <p class="osm-note">Real streets from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>.</p>
       </div>
     </div>
-  </div>`);
+  </div>`, 'side');
   $('pcForm').addEventListener('submit', (e) => {
     e.preventDefault();
     const pc = $('pc').value.trim();
@@ -331,7 +337,42 @@ function titleScreen(message = '') {
     const raw = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 7);
     e.target.value = raw.length > 4 ? `${raw.slice(0, -3)} ${raw.slice(-3)}` : raw;
     $('pcError').textContent = '';
+    // start fetching the map as soon as the postcode looks complete
+    clearTimeout(prefetchT);
+    if (/^[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}$/.test(e.target.value)) prefetchT = setTimeout(() => fetchArea(e.target.value).catch(() => {}), 350);
   });
+}
+
+const areaCache = new Map();
+let prefetchT = 0;
+function fetchArea(pc) {
+  const key = pc.toUpperCase().replace(/\s+/g, '');
+  if (!areaCache.has(key)) {
+    const p = fetch('/api/area?postcode=' + encodeURIComponent(pc)).then(async (res) => {
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || 'Something went wrong loading that area.');
+      return body;
+    });
+    p.catch(() => areaCache.delete(key));
+    areaCache.set(key, p);
+  }
+  return areaCache.get(key);
+}
+
+// a short fade hides the moment the city is swapped for another
+function fade(on) {
+  const f = $('fade');
+  f.classList.toggle('on', on);
+  return new Promise((ok) => setTimeout(ok, on ? 220 : 0));
+}
+
+async function switchArea(a) {
+  if (area && area.postcode === a.postcode && game) { game.resetRun(); return; }
+  await fade(true);
+  mountGame(a);
+  game.attract = true;
+  game.sync(0.016, performance.now() / 1000);
+  fade(false);
 }
 
 async function startWithPostcode(pc) {
@@ -339,29 +380,26 @@ async function startWithPostcode(pc) {
   track('start', { mode: 'postcode' });
   audio.start();
   store.set('altnets-postcode', pc.toUpperCase());
-  const steps = ['Finding your streets', 'Tracing the old copper', 'Locating the nearest nick', 'Putting the kettle on at the station'];
-  show(`<div class="card narrow loading"><div class="spinner"></div><p class="big-title" style="font-size:1.6rem">Surveying ${esc(pc.toUpperCase())}</p><p class="story" id="loadStep">${steps[0]}&hellip;</p></div>`);
-  let i = 0;
-  const timer = setInterval(() => { const el = $('loadStep'); if (el) el.innerHTML = steps[++i % steps.length] + '&hellip;'; }, 1800);
+  const btn = screen.querySelector('#pcForm button[type=submit]');
+  const slow = setTimeout(() => { if (btn) { btn.disabled = true; btn.innerHTML = '<span class="mini-spin"></span> Finding your streets&hellip;'; } }, 150);
   try {
-    const res = await fetch('/api/area?postcode=' + encodeURIComponent(pc));
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error || 'Something went wrong loading that area.');
-    clearInterval(timer);
-    mountGame(body);
+    const a = await fetchArea(pc);
+    clearTimeout(slow);
+    await switchArea(a);
     play();
   } catch (err) {
-    clearInterval(timer);
+    clearTimeout(slow);
     titleScreen(err.message || 'Something went wrong loading that area.');
   }
 }
 
+let baileyArea = null;
 async function startDemo() {
   playMode = 'demo';
   track('start', { mode: 'demo' });
   audio.start();
-  if (!area || area.postcode !== 'EC4M 7EH') mountGame(await (await fetch('/areas/old-bailey.json')).json());
-  else mountGame(area);
+  baileyArea = baileyArea || await (await fetch('/areas/old-bailey.json')).json();
+  await switchArea(baileyArea);
   play();
 }
 
@@ -475,7 +513,7 @@ function endScreen(kind) {
   audio.setMusic(false);
   track('end', { kind, pct, score: game.score, area: area.postcode });
   show(`
-  <div class="card narrow end">
+  <div class="card panel end">
     <p class="eyebrow">${head[0]}</p>
     <h2 class="big-title${kind === 'clear' ? ' teal' : ''}">${head[1]}</h2>
     <p class="story">${head[2]}</p>
@@ -495,10 +533,10 @@ function endScreen(kind) {
       <img class="card-preview" id="cardPreview" alt="Your share card" hidden>
       <div class="share-row"><button class="linkish" id="copy" type="button">Copy my score</button><button class="linkish" id="newPc" type="button">Try another postcode</button></div>
     </div>
-  </div>`);
+  </div>`, 'side');
   fillReality(mine);
   $('ctaBtn').addEventListener('click', () => track('cta', { kind, postcode: mine || null }));
-  $('again')?.addEventListener('click', () => { mountGame(area); play(); });
+  $('again')?.addEventListener('click', () => { game.resetRun(); play(); });
   $('next')?.addEventListener('click', () => { hide(); showPlayUi(true); game.nextRound(); });
   $('newPc').addEventListener('click', () => titleScreen());
   $('copy').addEventListener('click', () => copyText(share, $('copy')));
@@ -532,8 +570,8 @@ function pauseScreen() {
   </div>`);
   $('resume').addEventListener('click', resume);
   $('soundToggle').addEventListener('click', () => { toggleMute(); $('soundToggle').textContent = audio.isMuted() ? 'Sound: off' : 'Sound: on'; });
-  $('restart').addEventListener('click', () => { paused = false; mountGame(area); play(); });
-  $('quit').addEventListener('click', () => { paused = false; endScreen('quit'); });
+  $('restart').addEventListener('click', () => { paused = false; game.resetRun(); play(); });
+  $('quit').addEventListener('click', () => { paused = false; game.startOutro(); endScreen('quit'); });
 }
 
 function resume() { hide(); paused = false; if (game.state === 'play') audio.setMusic(true); }
@@ -561,7 +599,7 @@ function onGameEvent(type, data) {
   if (type === 'pop') pop(data.text, data.tone);
   if (type === 'go') flashBanner('<div class="big" style="color:var(--teal)">Go!</div>', 700);
   if (type === 'caught') flashBanner(`<div class="big" style="color:var(--orange)">Nicked!</div><div class="sub">${esc(data.name)} got you</div>`, 1700);
-  if (type === 'over') setTimeout(overScreen, 200);
+  if (type === 'over') setTimeout(overScreen, 900); // let the camera rise over your streets first
   if (type === 'go') audio.setMusic(true);
   if (type === 'clear') {
     audio.setMusic(false);
@@ -666,7 +704,8 @@ function frame(now) {
 
 // boot: the Old Bailey turns slowly behind the title card
 (async () => {
-  mountGame(await (await fetch('/areas/old-bailey.json')).json());
+  baileyArea = await (await fetch('/areas/old-bailey.json')).json();
+  mountGame(baileyArea);
   titleScreen();
   requestAnimationFrame(frame);
 })();

@@ -44,6 +44,8 @@ renderer.toneMappingExposure = 1.2;
 renderer.shadowMap.enabled = !coarse;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 let composer = null;
+let aoPass = null;
+let tier = 0; // quality steps taken on a slow device
 let bloom = null;
 
 let game = null;
@@ -62,11 +64,15 @@ function setupComposer() {
     ao.updateGtaoMaterial({ radius: 2.2, distanceExponent: 1.5, thickness: 2, scale: 1.1 });
     ao.blendIntensity = 0.85;
     composer.addPass(ao);
+    aoPass = ao;
   }
   bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.55, 0.45, 0.82);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
   composer.addPass(new ShaderPass(GradeShader));
+  // keep any quality steps already taken when a new area is built
+  if (tier >= 1 && aoPass) aoPass.enabled = false;
+  if (tier >= 2) bloom.enabled = false;
   resize();
 }
 
@@ -666,8 +672,18 @@ document.addEventListener('visibilitychange', () => { if (document.hidden && pla
 
 // drop the render resolution on slow devices so the game stays smooth
 let slow = 0, fast = 0, ratio = renderer.getPixelRatio();
+// Quality steps down when frames run slow: resolution first, then contact
+// shading, then bloom. It never steps back up past what the device managed.
 function tuneResolution(dt) {
   if (dt > 0.024) { slow += dt; fast = 0; } else { fast += dt; slow = Math.max(0, slow - dt * 0.5); }
+  if (slow > 1.5 && ratio <= 0.75 && tier < 2) {
+    tier++;
+    slow = 0;
+    if (tier === 1 && aoPass) aoPass.enabled = false;
+    if (tier === 2 && bloom) bloom.enabled = false;
+    track('quality', { tier });
+    return;
+  }
   if (slow > 1.5 && ratio > 0.75) { ratio = Math.max(0.75, ratio - 0.25); slow = 0; applyRatio(); }
   else if (fast > 6 && ratio < Math.min(devicePixelRatio, coarse ? 1.5 : 2)) { ratio += 0.25; fast = 0; applyRatio(); }
 }

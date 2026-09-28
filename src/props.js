@@ -235,6 +235,7 @@ export function buildProps(graph, area, opts = {}) {
   };
   const yawFacing = (fx, fz) => Math.atan2(-fx, -fz);
 
+  let counts_park = 0;
   const lists = { phone: [], pillar: [], bollard: [], tree: [], bench: [], bin: [], cab: [], bus: [], stop: [] };
   const push = (k, x, z, yaw, s = 1, colour) => lists[k].push({ x, z, yaw, s, colour });
 
@@ -281,7 +282,7 @@ export function buildProps(graph, area, opts = {}) {
           const s = spot(e, d, side, w / 2 + 1.9);
           if (nearJunction(s.x, s.z, w / 2 + 6) || inBuilding(s.x, s.z, 1.4) || !free(s.x, s.z, 1.8)) continue;
           if (lists.tree.length >= (low ? 60 : 140)) break;
-          const tint = new THREE.Color().setHSL(0.44 + r() * 0.08, 0.45 + r() * 0.15, 0.36 + r() * 0.12);
+          const tint = new THREE.Color().setHSL(0.47 + r() * 0.06, 0.5 + r() * 0.15, 0.22 + r() * 0.1);
           push('tree', s.x, s.z, r() * Math.PI * 2, 0.85 + r() * 0.35, tint);
           take(s.x, s.z, 2.2);
         }
@@ -307,6 +308,31 @@ export function buildProps(graph, area, opts = {}) {
       }
     }
   }
+
+  // open ground (squares, gardens, gaps between blocks): plant it like a park
+  const R2 = (area.radius || 200) * 1.05;
+  const pr = rng(9001 + graph.edges.length);
+  let park = 0;
+  for (let x = -R2; x <= R2; x += 11) {
+    for (let z = -R2; z <= R2; z += 11) {
+      if (Math.hypot(x, z) > R2 || park >= (low ? 40 : 110)) continue;
+      const jx = x + (pr() - 0.5) * 6, jz = z + (pr() - 0.5) * 6;
+      const near = graph.nearestOnEdges(jx, jz);
+      if (!near) continue;
+      const w = roadWidth(graph.edges[near.edge].kind);
+      if (near.dist < w / 2 + 4.5 || inBuilding(jx, jz, 2.5) || !free(jx, jz, 3)) continue;
+      if (pr() < 0.45) continue;
+      const tint = new THREE.Color().setHSL(0.47 + pr() * 0.07, 0.5 + pr() * 0.15, 0.2 + pr() * 0.11);
+      push('tree', jx, jz, pr() * Math.PI * 2, 0.9 + pr() * 0.5, tint);
+      take(jx, jz, 3);
+      park++;
+      if (pr() < 0.12 && lists.bench.length < 40) {
+        const bx = jx + 2.6, bz = jz;
+        if (!inBuilding(bx, bz, 1) && free(bx, bz, 1.2)) { push('bench', bx, bz, pr() * Math.PI * 2); take(bx, bz, 1.4); }
+      }
+    }
+  }
+  counts_park = park;
 
   // one bus at a stop on the widest main road
   const wide = graph.edges.filter((e) => roadWidth(e.kind) >= 10 && e.len > 40).sort((a, b) => b.len - a.len)[0];
@@ -409,5 +435,6 @@ export function buildProps(graph, area, opts = {}) {
 
   const counts = Object.fromEntries(Object.entries(lists).map(([k, v]) => [k, v.length]));
   counts.plates = done.size;
+  counts.park = counts_park;
   return { group, counts, update() {} };
 }

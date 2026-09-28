@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "bake": "node server/bake.js",
+    "test": "node --test test/*.test.mjs",
     "upload-tiles": "node tools/upload_tiles.mjs",
     "upload-fibre": "node tools/upload_tiles.mjs --fibre"
   },

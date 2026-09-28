@@ -50,6 +50,7 @@ export function speak(key, dist = 0, force = false) {
   src.connect(g).connect(master);
   src.start();
   voiceBusyUntil = ctx.currentTime + src.buffer.duration / src.playbackRate.value + 0.6;
+  duck(src.buffer.duration / src.playbackRate.value);
 }
 
 export function setMuted(v) {
@@ -100,74 +101,98 @@ export function updateSiren(nearest, time) {
 }
 
 // ------------------------------------------------------------ music
-// A small chiptune loop: kick, hats, a bassline and an arpeggio that joins in
-// as the streets fill up. Tempo climbs with coverage.
-const BASS = [40, 40, 52, 40, 43, 43, 55, 43, 36, 36, 48, 36, 38, 38, 50, 45];
-const ARP = [64, 67, 71, 67, 62, 67, 71, 74, 60, 64, 67, 64, 62, 66, 69, 66];
+// A cartoon night groove: pad chords (Am, F, C, G), a bassline, a plucked
+// arpeggio, kick, snare and hats. Layers join in and the tempo climbs as the
+// streets fill with fibre. The mix ducks under the coppers' voices.
+const CHORDS = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]]; // one bar each
+const BASS = [0, 0, 12, 0, 0, 7, 0, 12];
 const hz = (m) => 440 * 2 ** ((m - 69) / 12);
 let music = null;
 
 function noiseBuffer() {
-  const b = ctx.createBuffer(1, ctx.sampleRate * 0.2, ctx.sampleRate);
+  const b = ctx.createBuffer(1, ctx.sampleRate * 0.3, ctx.sampleRate);
   const d = b.getChannelData(0);
   for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
   return b;
 }
 
-function voice(freq, t, dur, type, vol, out) {
+function voice(freq, t, dur, type, vol, out, attack = 0.005) {
   const o = ctx.createOscillator();
   const g = ctx.createGain();
   o.type = type;
   o.frequency.setValueAtTime(freq, t);
-  g.gain.setValueAtTime(vol, t);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + attack);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
   o.connect(g).connect(out);
   o.start(t);
-  o.stop(t + dur + 0.02);
+  o.stop(t + dur + 0.05);
   return o;
 }
 
+function noiseHit(t, dur, vol, type, freq, out) {
+  const n = ctx.createBufferSource();
+  n.buffer = music.noise;
+  const f = ctx.createBiquadFilter();
+  f.type = type; f.frequency.value = freq;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  n.connect(f).connect(g).connect(out);
+  n.start(t);
+  n.stop(t + dur + 0.02);
+}
+
+function pad(chord, t, dur) {
+  const f = ctx.createBiquadFilter();
+  f.type = 'lowpass'; f.frequency.value = 900 + music.level * 900; f.Q.value = 0.7;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.045, t + 0.35);
+  g.gain.setValueAtTime(0.045, t + dur - 0.3);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  f.connect(g).connect(music.gain);
+  for (const m of chord) {
+    for (const det of [-7, 7]) {
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.value = hz(m);
+      o.detune.value = det;
+      o.connect(f);
+      o.start(t);
+      o.stop(t + dur + 0.05);
+    }
+  }
+}
+
 function playStep(step, t) {
-  const m = music, out = m.gain;
-  if (step % 4 === 0) {
-    const o = voice(140, t, 0.18, 'sine', 0.35, out);
-    o.frequency.exponentialRampToValueAtTime(40, t + 0.15);
+  const m = music, out = m.gain, lv = m.level;
+  const bar = Math.floor(step / 16) % 4, s16 = step % 16;
+  const chord = CHORDS[bar];
+  if (s16 === 0) pad(chord, t, (60 / m.tempo) * 4);
+  // kick: on the beat, doubled up once the streets start filling
+  if (s16 % 4 === 0 || (lv > 0.6 && s16 === 14)) {
+    const o = voice(150, t, 0.22, 'sine', 0.5, out);
+    o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
   }
-  if (step % 2 === 1 || m.level > 0.5) {
-    const n = ctx.createBufferSource();
-    n.buffer = m.noise;
-    const hp = ctx.createBiquadFilter();
-    hp.type = 'highpass'; hp.frequency.value = 7000;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(step % 2 ? 0.07 : 0.035, t);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
-    n.connect(hp).connect(g).connect(out);
-    n.start(t);
-    n.stop(t + 0.06);
-  }
-  if (step % 8 === 4) {
-    const n = ctx.createBufferSource();
-    n.buffer = m.noise;
-    const bp = ctx.createBiquadFilter();
-    bp.type = 'bandpass'; bp.frequency.value = 1800;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.12, t);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
-    n.connect(bp).connect(g).connect(out);
-    n.start(t);
-    n.stop(t + 0.16);
-  }
-  if (step % 2 === 0) voice(hz(BASS[(step >> 1) % 16]), t, 0.16, 'triangle', 0.22, out);
-  if (m.level > 0.25) voice(hz(ARP[step % 16]), t, 0.09, 'square', 0.035 + m.level * 0.02, out);
+  // snare on two and four
+  if (s16 === 4 || s16 === 12) { noiseHit(t, 0.16, 0.16, 'bandpass', 1900, out); voice(190, t, 0.08, 'triangle', 0.12, out); }
+  // hats: offbeats, sixteenths later on
+  if (s16 % 2 === 1 || (lv > 0.45 && s16 % 1 === 0)) noiseHit(t, 0.04, s16 % 4 === 2 ? 0.05 : 0.03, 'highpass', 8000, out);
+  // bass
+  if (s16 % 2 === 0) voice(hz(chord[0] - 24 + BASS[(s16 / 2) % 8]), t, 0.2, 'triangle', 0.26, out);
+  // plucked arpeggio once you're a quarter of the way in
+  if (lv > 0.25 && s16 % 2 === 0) voice(hz(chord[(s16 / 2) % 3] + 12 + (s16 >= 8 ? 12 : 0)), t, 0.16, 'square', 0.028 + lv * 0.02, out);
 }
 
 export function setMusic(on) {
   if (!ctx) return;
   if (on && !music?.timer) {
-    music = music || { gain: ctx.createGain(), noise: noiseBuffer(), level: 0, tempo: 124, step: 0, next: 0 };
-    music.gain.gain.value = 0.55;
+    music = music || { gain: ctx.createGain(), noise: noiseBuffer(), level: 0, tempo: 112, step: 0, next: 0 };
+    music.gain.gain.value = 0.5;
     music.gain.connect(master);
     music.next = ctx.currentTime + 0.06;
+    music.step = 0;
     music.timer = setInterval(() => {
       while (music.next < ctx.currentTime + 0.12) {
         playStep(music.step, music.next);
@@ -186,5 +211,14 @@ export function setMusic(on) {
 export function setMusicLevel(level) {
   if (!music) return;
   music.level = level;
-  music.tempo = 124 + level * 30;
+  music.tempo = 112 + level * 26;
+}
+
+// pull the music down while a voice line plays
+function duck(seconds) {
+  if (!music?.timer) return;
+  const g = music.gain.gain, t = ctx.currentTime;
+  g.cancelScheduledValues(t);
+  g.setTargetAtTime(0.18, t, 0.05);
+  g.setTargetAtTime(0.5, t + seconds, 0.25);
 }

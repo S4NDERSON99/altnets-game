@@ -14,7 +14,8 @@ const GradeShader = {
     void main(){
       vec4 c = texture2D(tDiffuse, vUv);
       float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
-      c.rgb = mix(vec3(l), c.rgb, 1.16);
+      c.rgb = mix(vec3(l), c.rgb, 1.32);
+      c.rgb += (1.0 - c.rgb) * 0.035; // lift the blacks a touch, cartoon not murk
       c.rgb = (c.rgb - 0.5) * 1.07 + 0.5;
       c.rgb += mix(vec3(0.01, -0.01, 0.04), vec3(0.02, 0.0, 0.01), smoothstep(0.2, 0.8, l));
       vec2 d = vUv - 0.5;
@@ -40,7 +41,7 @@ const canvas = $('scene');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: !coarse, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, coarse ? 1.5 : 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.2;
+renderer.toneMappingExposure = 1.38;
 renderer.shadowMap.enabled = !coarse;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 let composer = null;
@@ -125,6 +126,13 @@ function updateHud() {
   if (!game || game.attract) return;
   const h = game.hud();
   if (h.score !== hud.score) { hud.score = h.score; $('score').textContent = h.score.toLocaleString('en-GB'); }
+  if (h.coins !== hud.coins) {
+    hud.coins = h.coins;
+    $('coins').textContent = h.coins;
+    $('coins').parentElement.classList.remove('bump');
+    void $('coins').offsetWidth;
+    $('coins').parentElement.classList.add('bump');
+  }
   if (h.pct !== hud.pct) { hud.pct = h.pct; $('pct').textContent = h.pct + '%'; $('bar').style.width = h.pct + '%'; }
   if (h.lives !== hud.lives) {
     hud.lives = h.lives;
@@ -136,7 +144,7 @@ function updateHud() {
   if (h.buf !== hud.buf) {
     hud.buf = h.buf;
     $('turnChip').hidden = !h.buf;
-    $('turnChip').textContent = h.buf === 'left' ? '‹ Next left' : 'Next right ›';
+    $('turnChip').textContent = h.buf === 'left' ? '‹ Left lane: turning left' : 'Right lane: turning right ›';
   }
   const mult = h.mult > 1 ? h.mult : 0;
   if (mult !== hud.mult) {
@@ -319,11 +327,12 @@ function titleScreen(message = '') {
           <p class="note" id="pcNote">Your postcode only draws the map.${best ? ` <b class="best-chip">Your best: ${best.toLocaleString('en-GB')}</b>` : ''}</p>
         </form>
         <ul class="how">
-          <li class="keys-only"><kbd>&larr;</kbd><kbd>&rarr;</kbd> turn at the next junction</li>
+          <li class="keys-only"><kbd>&larr;</kbd><kbd>&rarr;</kbd> change lane. Your lane picks the turn</li>
           <li class="keys-only"><kbd>Space</kbd> jump roadworks</li>
           <li class="keys-only"><kbd>&darr;</kbd> U-turn</li>
-          <li class="touch-only">Tap or swipe left and right to turn</li>
+          <li class="touch-only">Swipe left and right to change lane. Your lane picks the turn</li>
           <li class="touch-only">Swipe up to jump</li>
+          <li><span class="dot" style="background:#ffc928"></span> Grab the Altnets coins</li>
           <li><span class="dot" style="background:var(--yellow)"></span> Switch-off: the coppers run for it</li>
           <li><span class="dot" style="background:var(--pink)"></span> Gigabit: speed boost</li>
         </ul>
@@ -526,7 +535,7 @@ function endScreen(kind) {
     <div class="stats">
       <div><small>Score</small><b>${game.score.toLocaleString('en-GB')}</b></div>
       <div><small>In the game</small><b>${pct}%</b></div>
-      <div><small>Streets</small><b>${kind === 'clear' ? game.g.edges.length : game.streetsDone}</b></div>
+      <div><small>Coins</small><b>${game.coinCount}</b></div>
     </div>
     <p class="best">${game.score >= best && game.score > 0 ? 'New personal best!' : `Your best: ${best.toLocaleString('en-GB')}`}</p>
     <div class="reality" id="reality"></div>
@@ -567,11 +576,11 @@ function pauseScreen() {
       <button class="linkish" id="quit">End this run</button>
     </div>
     <ul class="how compact">
-      <li class="keys-only"><kbd>&larr;</kbd><kbd>&rarr;</kbd> turn</li>
+      <li class="keys-only"><kbd>&larr;</kbd><kbd>&rarr;</kbd> change lane</li>
       <li class="keys-only"><kbd>Space</kbd> jump</li>
       <li class="keys-only"><kbd>&darr;</kbd> U-turn</li>
       <li class="keys-only"><kbd>M</kbd> sound</li>
-      <li class="touch-only">Tap or swipe left and right to turn, swipe up to jump, swipe down to turn round</li>
+      <li class="touch-only">Swipe left and right to change lane, swipe up to jump, swipe down to turn round</li>
     </ul>
   </div>`);
   $('resume').addEventListener('click', resume);
@@ -583,7 +592,8 @@ function pauseScreen() {
 function resume() { hide(); paused = false; if (game.state === 'play') audio.setMusic(true); }
 
 const HINTS = {
-  turn: coarse ? 'Tap the left or right side of the screen to take the next turn.' : 'Press <kbd>&larr;</kbd> or <kbd>&rarr;</kbd> before a junction to take the next turn. <kbd>&darr;</kbd> turns you round.',
+  turn: coarse ? 'Swipe left or right to change lane. Be in the left lane at a junction to turn left, the right lane to turn right.' : 'Press <kbd>&larr;</kbd> or <kbd>&rarr;</kbd> to change lane. Left lane at a junction turns left, right lane turns right, the middle goes straight on.',
+  coins: 'Altnets coins! Change lane to scoop up whole rows.',
   jump: coarse ? 'Roadworks ahead! Swipe up to jump.' : 'Roadworks ahead! Press <kbd>Space</kbd> to jump.',
   chase: 'Switch-off! The coppers are scared. Catch them for big points.',
 };

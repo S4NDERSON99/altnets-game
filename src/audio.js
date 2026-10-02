@@ -77,6 +77,7 @@ function tone(freq, dur, { type = 'square', vol = 0.05, slide = 1, delay = 0 } =
 let tick = 0;
 export const sfx = {
   lay() { tick = (tick + 1) % 6; tone(900 + tick * 70, 0.04, { type: 'triangle', vol: 0.025 }); },
+  coin() { tone(1319, 0.06, { type: 'square', vol: 0.03 }); tone(1976, 0.12, { type: 'square', vol: 0.03, delay: 0.05 }); },
   turn() { tone(520, 0.05, { type: 'triangle', vol: 0.03 }); },
   jump() { tone(380, 0.22, { vol: 0.04, slide: 2 }); },
   land() { tone(160, 0.08, { type: 'triangle', vol: 0.05 }); },

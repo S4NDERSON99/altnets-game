@@ -629,6 +629,28 @@ function streets(scene, graph, opts) {
     scene.add(inst);
   }
 
+  // dashed lane lines, so the three running lanes read at a glance
+  const dashes = [];
+  for (const e of graph.edges) {
+    const w = roadWidth(e.kind);
+    if (w < 7 || e.len < 16) continue;
+    const lw = Math.min(2.2, w / 3);
+    for (let d = w / 2 + 3; d < e.len - w / 2 - 3; d += 4.5) {
+      const p = graph.pointAt(e, d);
+      for (const s of [-0.5, 0.5]) dashes.push({ x: p.x + Math.cos(p.h) * s * lw, z: p.z + Math.sin(p.h) * s * lw, h: p.h });
+    }
+  }
+  if (dashes.length) {
+    const inst = new THREE.InstancedMesh(new THREE.BoxGeometry(0.14, 0.02, 2.2), new THREE.MeshBasicMaterial({ color: 0xdfe6ff, transparent: true, opacity: 0.55 }), dashes.length);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1);
+    dashes.forEach((d, i) => {
+      q.setFromAxisAngle(up, Math.atan2(Math.sin(d.h), -Math.cos(d.h)));
+      m.compose(new THREE.Vector3(d.x, 0.063, d.z), q, one);
+      inst.setMatrixAt(i, m);
+    });
+    scene.add(inst);
+  }
+
   // street lamps with warm pools of light on the road
   const lamps = [];
   for (const e of graph.edges) {
@@ -718,7 +740,7 @@ export function buildWorld(area, graph, opts = {}) {
   scene.fog = new THREE.Fog(0x2d3a86, 150, 950); // blue night haze that only builds up in the distance
   const time = { value: 0 };
 
-  scene.add(new THREE.HemisphereLight(0xaab8ff, 0x2a2060, 2.4));
+  scene.add(new THREE.HemisphereLight(0xb4c0ff, 0x3a2a78, 2.9));
   scene.add(new THREE.AmbientLight(0x5a6ac0, 0.8));
   const moon = new THREE.DirectionalLight(0xc4ceff, 3.2); // cool moonlight
   moon.position.copy(SUN_DIR).multiplyScalar(160);

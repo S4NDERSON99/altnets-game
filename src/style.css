@@ -78,6 +78,10 @@ button { cursor: pointer; }
 .meter-label { margin-top: 5px; font-size: 0.8rem; color: var(--dim); text-align: center; }
 .meter-label b { color: var(--teal); font-weight: 800; font-variant-numeric: tabular-nums; }
 .hud-right { display: flex; align-items: center; gap: 12px; }
+.hud-coins { display: flex; align-items: center; gap: 6px; font-weight: 800; font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+.coin-ico { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 0.8rem; font-weight: 900; color: #0b8f8a; background: radial-gradient(circle at 38% 35%, #fff3a8, #ffc928 55%, #e08a00); box-shadow: inset 0 0 0 2px #c87400; }
+.hud-coins.bump .coin-ico { animation: coinbump 0.25s ease-out; }
+@keyframes coinbump { 40% { transform: scale(1.35) rotate(-12deg); } }
 .hud-score { text-align: right; line-height: 1; }
 .hud-score small { display: block; font-size: 0.66rem; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); }
 .hud-score b { font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; }

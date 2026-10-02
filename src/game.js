@@ -6,6 +6,7 @@ import { buildWorld, roadWidth, COLOURS } from './world.js';
 import { makeRunner, makeCopper, makeSwitchOff, makeGigabit, makeHurdle, makeBlueLamp } from './actors.js';
 import { sfx, updateSiren, speak } from './audio.js';
 import { Sparks, makeBubble, makeSign, TAUNTS, SCARED } from './fx.js';
+import { Coins } from './coins.js';
 
 export const COPS = [
   { name: 'Sgt Dial-Up', kind: 'chase', tint: 0xd2753a, wait: 1.2 },
@@ -23,6 +24,12 @@ const FIBRE_CYCLE = [COLOURS.fibre, COLOURS.pink, COLOURS.yellow, COLOURS.orange
 const SPARK = [new THREE.Color(0x1ecbc4), new THREE.Color(0xc8fffb)];
 const BURST = [new THREE.Color(0xc8703c), new THREE.Color(0xf6c521), new THREE.Color(0xffffff)];
 const INTRO = 3.4;
+const COIN_SPARK = [new THREE.Color(0xffd23f), new THREE.Color(0xfff3a8), new THREE.Color(0xffffff)];
+// three lanes per street, squeezed on narrow ones
+const laneW = (e) => Math.min(2.2, roadWidth(e.kind) / 3);
+const LANE_SPEED = 16; // metres a second sideways for the runner
+const COP_LANE_SPEED = 5.5; // coppers are slower to switch, so you can dodge them
+const offset = (p, lx) => ({ x: p.x + Math.cos(p.h) * lx, z: p.z + Math.sin(p.h) * lx, h: p.h });
 
 const lerpAngle = (a, b, t) => a + wrap(b - a) * t;
 
@@ -46,6 +53,8 @@ export class Game {
       c.view.group.add(c.bubble.sprite);
     });
     this.sparks = new Sparks(this.scene);
+    this.coins = new Coins(this.scene);
+    this.coinCount = 0;
     this.signs = [0, 1, 2, 3, 4].map(() => {
       const s = makeSign();
       this.scene.add(s.sprite);
@@ -170,6 +179,10 @@ export class Game {
     this.streetsDone = 0;
     this.g.resetFibre();
     this.world.resetFibre();
+    // keep coins off the start and the junction power-ups
+    const sp = this.g.pose(this.start);
+    const avoid = [{ x: sp.x, z: sp.z, r: 14 }, ...this.corners.map((i) => ({ x: this.g.nodes[i].x, z: this.g.nodes[i].z, r: 5 }))];
+    this.coins.layout(this.g, laneW, avoid);
     for (const p of this.pickups) this.scene.remove(p.view.group);
     this.pickups = [];
     for (const i of this.corners) {
@@ -183,11 +196,14 @@ export class Game {
   }
 
   resetActors() {
-    this.p = { ...this.start, buf: null, air: 0, jcd: 0, stumble: 0, boost: 0, since: 99, last: null };
+    this.p = { ...this.start, buf: null, lane: 0, lx: 0, air: 0, jcd: 0, stumble: 0, boost: 0, since: 99, last: null };
     this.cops.forEach((c, i) => {
       c.mode = 'wait';
       c.waitT = Math.max(0.8, c.wait - (this.round - 1) * 0.8);
       c.m = null;
+      c.lane = 0;
+      c.lx = 0;
+      c.laneT = 0;
       c.rT = 0;
       c.wt = null;
       c.sayT = 0;
@@ -231,23 +247,36 @@ export class Game {
 
   // ---------------------------------------------------------------- input
 
+  // left/right moves a lane. The lane you're in at a junction picks the exit:
+  // left lane turns left, right lane turns right, the middle goes straight on.
   turn(want) {
     if (this.state !== 'play' && this.state !== 'ready') return;
     const P = this.p, g = this.g;
-    P.buf = want;
-    sfx.turn();
-    // pressed just after a junction: take the turn anyway
-    if (this.state === 'play' && P.last && P.since < 9) {
+    const step = want === 'left' ? -1 : 1;
+    const lane = Math.max(-1, Math.min(1, P.lane + step));
+    if (lane === P.lane) { this.shake = Math.max(this.shake, 0.15); sfx.land(); }
+    else sfx.turn();
+    P.lane = lane;
+    P.buf = lane < 0 ? 'left' : lane > 0 ? 'right' : null;
+    // moved over just after a junction: take that turn anyway
+    if (this.state === 'play' && P.buf && P.last && P.since < 6) {
       const { node, inH, edge, dir } = P.last;
-      const pick = g.choose(g.options(node, { edge, dir }, inH), want);
+      const pick = g.choose(g.options(node, { edge, dir }, inH), P.buf);
       if (pick && !(pick.edge === P.edge && pick.dir === P.dir)) {
         P.edge = pick.edge;
         P.dir = pick.dir;
         P.s = Math.min(P.since, g.edges[pick.edge].len - 0.1);
-        P.buf = null;
         P.last = null;
+        this.tookTurn();
       }
     }
+  }
+
+  // after turning, drop back into the middle lane of the new street
+  tookTurn() {
+    const P = this.p;
+    P.lane = 0;
+    P.buf = null;
   }
 
   uturn() {
@@ -255,7 +284,9 @@ export class Game {
     const P = this.p;
     P.dir = -P.dir;
     P.s = this.g.edges[P.edge].len - P.s;
-    P.buf = null;
+    P.lane = -P.lane;
+    P.lx = -P.lx;
+    P.buf = P.lane < 0 ? 'left' : P.lane > 0 ? 'right' : null;
     P.last = null;
     this.seedTrail();
   }
@@ -300,6 +331,7 @@ export class Game {
     this.updateCops(dt);
     this.updateHurdles(dt);
     this.updatePickups(dt);
+    this.updateCoins(dt);
     this.updateFinder(dt);
     if (this.grace > 0) this.grace -= dt;
     this.checkCops();
@@ -326,6 +358,9 @@ export class Game {
     if (P.stumble > 0) sp *= 0.4;
     advance(g, P, sp * dt, (m, node, inH) => this.playerAtNode(m, node, inH));
     P.since += sp * dt;
+    const want = P.lane * laneW(g.edges[P.edge]);
+    const step = LANE_SPEED * dt;
+    P.lx += Math.max(-step, Math.min(step, want - P.lx));
     const e = g.edges[P.edge];
     this.layAt(P.edge, P.dir === 1 ? P.s : e.len - P.s);
   }
@@ -396,7 +431,7 @@ export class Game {
     this.layAt(m.edge, m.dir === 1 ? e.len - 0.01 : 0.01);
     const opts = g.options(node, m, inH);
     const { pick, turning } = this.planExit(node, opts);
-    if (turning || opts.length >= 2) P.buf = null;
+    if (turning) this.tookTurn();
     P.last = { node, inH, edge: m.edge, dir: m.dir };
     P.since = 0;
     if (!pick) { // dead end: turn round, and say so
@@ -406,6 +441,48 @@ export class Game {
     }
     m.edge = pick.edge;
     m.dir = pick.dir;
+  }
+
+  // where the runner actually is, lane included
+  runnerPos() {
+    return offset(this.g.pose(this.p), this.p.lx);
+  }
+
+  copPos(c) {
+    return offset(this.g.pose(c.m), c.lx);
+  }
+
+  // coppers drift into your lane when they get close
+  copLanes(c, dt, rp) {
+    const g = this.g, e = g.edges[c.m.edge];
+    const lw = laneW(e);
+    c.laneT -= dt;
+    if (c.laneT <= 0) {
+      c.laneT = 0.7 + Math.random() * 0.5;
+      const cp = g.pose(c.m);
+      if (Math.hypot(cp.x - rp.x, cp.z - rp.z) < 40) {
+        let best = 0, bd = Infinity;
+        for (const l of [-1, 0, 1]) {
+          const q = offset(cp, l * lw);
+          const d = Math.hypot(q.x - rp.x, q.z - rp.z);
+          if (d < bd) { bd = d; best = l; }
+        }
+        c.lane = best;
+      } else if (Math.random() < 0.2) c.lane = Math.floor(Math.random() * 3) - 1;
+    }
+    const want = c.lane * lw, step = COP_LANE_SPEED * dt;
+    c.lx += Math.max(-step, Math.min(step, want - c.lx));
+  }
+
+  updateCoins(dt) {
+    const rp = this.runnerPos();
+    const n = this.coins.collect(rp.x, rp.z);
+    if (!n) return;
+    this.coinCount += n;
+    this.score += 5 * n * this.mult;
+    sfx.coin();
+    this.sparks.burst(rp.x, 1.6, rp.z, 6, COIN_SPARK, { up: 5, spread: 2.5, life: 0.4 });
+    if (this.coinCount === 1) this.hint('coins');
   }
 
   modeName() {
@@ -433,7 +510,7 @@ export class Game {
   }
 
   updateCops(dt) {
-    const pp = this.g.pose(this.p);
+    const pp = this.g.pose(this.p), rp = this.runnerPos();
     for (const c of this.cops) {
       if (c.sayT > 0) { c.sayT -= dt; if (c.sayT <= 0) c.bubble.hide(); }
       if (c.mode === 'active') {
@@ -458,6 +535,7 @@ export class Game {
         continue;
       }
       advance(this.g, c.m, this.copSpeed(c) * dt, (m, node, inH) => this.copAtNode(c, m, node, inH));
+      this.copLanes(c, dt, rp);
     }
   }
 
@@ -546,14 +624,14 @@ export class Game {
   }
 
   checkCops() {
-    const pp = this.g.pose(this.p);
+    const pp = this.runnerPos();
     let nearest = Infinity;
     for (const c of this.cops) {
       if (c.mode !== 'active' && c.mode !== 'fright') continue;
-      const cp = this.g.pose(c.m);
+      const cp = this.copPos(c);
       const d = Math.hypot(pp.x - cp.x, pp.z - cp.z);
       if (c.mode === 'active') nearest = Math.min(nearest, d);
-      if (d > CATCH) continue;
+      if (d > (c.mode === 'fright' ? CATCH : 1.5)) continue;
       if (c.mode === 'active' && this.grace > 0) continue;
       if (c.mode === 'fright') {
         this.combo++;
@@ -602,29 +680,38 @@ export class Game {
     return null;
   }
 
+  // hurdles block one or two lanes, never all three: dodge round them or jump
   updateHurdles(dt) {
     this.hurdleT -= dt;
     if (this.hurdleT <= 0) {
-      this.hurdleT = Math.max(3, 6.5 - this.round);
-      if (this.hurdles.length < 3 + this.round) {
+      this.hurdleT = Math.max(2.2, 5 - this.round * 0.8);
+      if (this.hurdles.length < 5 + this.round * 2) {
         const s = this.randomSpot(55);
         if (s) {
           const type = HURDLES[Math.floor(Math.random() * HURDLES.length)];
-          const view = makeHurdle(type, roadWidth(s.e.kind));
-          view.position.set(s.x, 0, s.z);
-          view.rotation.y = -s.h;
-          this.scene.add(view);
-          this.hurdles.push({ type, x: s.x, z: s.z, view, life: 30, cleared: false });
+          const lw = laneW(s.e);
+          const lanes = [-1, 0, 1].sort(() => Math.random() - 0.5).slice(0, Math.random() < 0.45 ? 2 : 1);
+          const group = new THREE.Group();
+          const pieces = lanes.map((l) => {
+            const v = makeHurdle(type, Math.max(1.8, lw * 0.95));
+            const q = offset(s, l * lw);
+            v.position.set(q.x, 0, q.z);
+            v.rotation.y = -s.h;
+            group.add(v);
+            return { x: q.x, z: q.z };
+          });
+          this.scene.add(group);
+          this.hurdles.push({ type, x: s.x, z: s.z, pieces, view: group, life: 30, cleared: false });
         }
       }
     }
-    const pp = this.g.pose(this.p), P = this.p;
+    const pp = this.runnerPos(), P = this.p;
     if (!this.hints.has('jump') && this.hurdles.some((h) => Math.hypot(pp.x - h.x, pp.z - h.z) < 45)) this.hint('jump');
     this.hurdles = this.hurdles.filter((h) => {
       h.life -= dt;
-      const d = Math.hypot(pp.x - h.x, pp.z - h.z);
+      const d = Math.min(...h.pieces.map((q) => Math.hypot(pp.x - q.x, pp.z - q.z)));
       let keep = h.life > 0;
-      if (d < 2.2) {
+      if (d < 1.4) {
         if (P.air > 0) {
           if (!h.cleared) { h.cleared = true; this.score += 50; this.emit('pop', { text: 'Cleared! +50', tone: 'teal' }); }
         } else if (!h.cleared) {
@@ -657,7 +744,7 @@ export class Game {
         }
       }
     }
-    const pp = this.g.pose(this.p);
+    const pp = this.runnerPos();
     this.pickups = this.pickups.filter((p) => {
       p.life -= dt;
       const got = Math.hypot(pp.x - p.x, pp.z - p.z) < 3.2;
@@ -714,6 +801,8 @@ export class Game {
   resetRun() {
     this.round = 1;
     this.score = 0;
+    this.coinCount = 0;
+    this.coins.reset();
     this.lives = 3;
     this.outro = false;
     this.slowmo = 0;
@@ -746,7 +835,8 @@ export class Game {
 
   sync(dt, t) {
     const g = this.g, P = this.p, R = this.runner;
-    const pp = g.pose(P);
+    const pc = g.pose(P);
+    const pp = offset(pc, P.lx);
     R.group.position.set(pp.x, 0, pp.z);
     const f = P.air > 0 ? 1 - P.air / JUMP : 0;
     const lift = Math.sin(Math.PI * f);
@@ -768,7 +858,8 @@ export class Game {
       const stride = running ? Math.sin(t * 15) : 0;
       b.position.y = lift * 3.4 + (running && !R.mixer ? Math.abs(stride) * 0.3 : 0);
       b.rotation.x = running ? 0.14 : 0;
-      b.rotation.z = -turn * 1.4 + (running && !R.mixer ? stride * 0.08 : 0);
+      const slide = Math.max(-1, Math.min(1, (P.lane * laneW(g.edges[P.edge]) - P.lx) / 2.2));
+      b.rotation.z = -turn * 1.4 - slide * 0.35 + (running && !R.mixer ? stride * 0.08 : 0);
       if (P.stumble > 0) b.rotation.z += Math.sin(t * 40) * 0.25;
       let sy = 1 + (running && !R.mixer ? Math.abs(stride) * 0.05 : 0);
       if (P.air > 0) sy = 1 + lift * 0.12;
@@ -801,7 +892,7 @@ export class Game {
         v.group.position.y = 0;
         return;
       }
-      const cp = g.pose(c.m);
+      const cp = this.copPos(c);
       v.group.position.set(cp.x, Math.abs(Math.sin(t * 12 + i)) * 0.2, cp.z);
       v.group.rotation.y = -cp.h;
       v.tick?.(dt, t, this.state === 'play');
@@ -838,9 +929,10 @@ export class Game {
       this.sparks.burst(pp.x + (Math.random() - 0.5) * 16, 7, pp.z + (Math.random() - 0.5) * 16, 5, FIBRE_CYCLE, { up: 2, spread: 3, life: 1.8 });
     }
     this.sparks.update(dt);
+    this.coins.update(dt, t);
     this.syncChevrons(t);
     this.world.update(t, pp);
-    this.syncCamera(dt, t, pp);
+    this.syncCamera(dt, t, this.attract || this.outro ? pp : offset(pc, P.lx * 0.55));
     if (this.state === 'play') updateSiren(this.nearestCop ?? Infinity, t);
   }
 
@@ -988,6 +1080,8 @@ export class Game {
       pct: Math.floor(g.coverage * 100),
       street: g.edges[P.edge].name,
       buf: P.buf,
+      lane: P.lane,
+      coins: this.coinCount,
       round: this.round,
       fright: this.fright,
       boost: P.boost,

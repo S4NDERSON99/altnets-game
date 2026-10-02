@@ -10,11 +10,11 @@ import { Coins } from './coins.js';
 
 export const COPS = [
   { name: 'Sgt Dial-Up', kind: 'chase', tint: 0xd2753a, wait: 1.2 },
-  { name: 'PC Landline', kind: 'ambush', tint: 0xe0906a, wait: 3.5 },
-  { name: 'Inspector ADSL', kind: 'shy', tint: 0xb8622e, wait: 6 },
-  { name: 'DC Buffering', kind: 'wander', tint: 0xa9582a, wait: 9 },
+  { name: 'PC Landline', kind: 'ambush', tint: 0xe0906a, wait: 2 },
+  { name: 'Inspector ADSL', kind: 'shy', tint: 0xb8622e, wait: 4 },
+  { name: 'DC Buffering', kind: 'wander', tint: 0xa9582a, wait: 6 },
 ];
-const MODES = [[5, 'scatter'], [20, 'chase'], [5, 'scatter'], [25, 'chase'], [Infinity, 'chase']];
+const MODES = [[3, 'scatter'], [25, 'chase'], [3, 'scatter'], [30, 'chase'], [Infinity, 'chase']];
 const JUMP = 0.62;
 const CATCH = 2.6;
 const HURDLES = ['roadworks', 'manhole', 'bike'];
@@ -24,11 +24,13 @@ const FIBRE_CYCLE = [COLOURS.fibre, COLOURS.pink, COLOURS.yellow, COLOURS.orange
 const SPARK = [new THREE.Color(0x1ecbc4), new THREE.Color(0xc8fffb)];
 const BURST = [new THREE.Color(0xc8703c), new THREE.Color(0xf6c521), new THREE.Color(0xffffff)];
 const INTRO = 3.4;
+const RUN_SPEED = 20;
+const TAIL_GAP = 5; // Sgt Dial-Up starts this far behind you, already running
 const COIN_SPARK = [new THREE.Color(0xffd23f), new THREE.Color(0xfff3a8), new THREE.Color(0xffffff)];
 // three lanes per street, squeezed on narrow ones
 const laneW = (e) => Math.min(2.2, roadWidth(e.kind) / 3);
 const LANE_SPEED = 16; // metres a second sideways for the runner
-const COP_LANE_SPEED = 5.5; // coppers are slower to switch, so you can dodge them
+const COP_LANE_SPEED = 5.5; // only used to settle a copper into his lane on a new street
 const offset = (p, lx) => ({ x: p.x + Math.cos(p.h) * lx, z: p.z + Math.sin(p.h) * lx, h: p.h });
 
 const lerpAngle = (a, b, t) => a + wrap(b - a) * t;
@@ -226,6 +228,14 @@ export class Game {
       if (p.type === 'gig') this.scene.remove(p.view.group);
       return p.type !== 'gig';
     });
+    const P = this.p, pe = this.g.edges[P.edge];
+    if (P.s < TAIL_GAP + 3 && pe.len > TAIL_GAP + 8) P.s = TAIL_GAP + 3;
+    const tail = this.cops.find((c) => c.kind === 'chase');
+    tail.m = { edge: P.edge, dir: P.dir, s: Math.max(0.5, P.s - TAIL_GAP) };
+    tail.mode = 'active';
+    tail.lane = 0; // right behind you in the middle lane
+    tail.lx = 0;
+    tail.nextTaunt = 0.5;
     const pose = this.g.pose(this.p);
     this.camH = pose.h;
     this.readyT = 2.2;
@@ -353,7 +363,7 @@ export class Game {
     } else if (P.jcd > 0) P.jcd -= dt;
     P.stumble = Math.max(0, P.stumble - dt);
     P.boost = Math.max(0, P.boost - dt);
-    let sp = 15 + (this.round - 1) * 0.6;
+    let sp = this.runSpeed();
     if (P.boost > 0) sp *= 1.45;
     if (P.stumble > 0) sp *= 0.4;
     advance(g, P, sp * dt, (m, node, inH) => this.playerAtNode(m, node, inH));
@@ -452,25 +462,9 @@ export class Game {
     return offset(this.g.pose(c.m), c.lx);
   }
 
-  // coppers drift into your lane when they get close
-  copLanes(c, dt, rp) {
-    const g = this.g, e = g.edges[c.m.edge];
-    const lw = laneW(e);
-    c.laneT -= dt;
-    if (c.laneT <= 0) {
-      c.laneT = 0.7 + Math.random() * 0.5;
-      const cp = g.pose(c.m);
-      if (Math.hypot(cp.x - rp.x, cp.z - rp.z) < 40) {
-        let best = 0, bd = Infinity;
-        for (const l of [-1, 0, 1]) {
-          const q = offset(cp, l * lw);
-          const d = Math.hypot(q.x - rp.x, q.z - rp.z);
-          if (d < bd) { bd = d; best = l; }
-        }
-        c.lane = best;
-      } else if (Math.random() < 0.2) c.lane = Math.floor(Math.random() * 3) - 1;
-    }
-    const want = c.lane * lw, step = COP_LANE_SPEED * dt;
+  // each copper is stuck in one lane: change lane to get round them
+  copLanes(c, dt) {
+    const want = c.lane * laneW(this.g.edges[c.m.edge]), step = COP_LANE_SPEED * dt;
     c.lx += Math.max(-step, Math.min(step, want - c.lx));
   }
 
@@ -502,15 +496,26 @@ export class Game {
     if (this.modeT > MODES[this.modeIdx][0]) { this.modeT = 0; this.modeIdx = Math.min(this.modeIdx + 1, MODES.length - 1); }
   }
 
+  runSpeed() {
+    return RUN_SPEED + (this.round - 1) * 0.8;
+  }
+
   copSpeed(c) {
-    if (c.mode === 'fright') return 6.5;
-    let s = 11.0 + (this.round - 1) * 0.9;
-    if (c.kind === 'chase' && this.g.coverage > 0.7) s += 0.9;
-    return Math.min(14.5, s);
+    if (c.mode === 'fright') return 8;
+    const run = this.runSpeed();
+    if (c.kind === 'chase') {
+      // the tail copper: never far behind. Drops back slowly while you run
+      // clean, closes in fast if you stumble or he loses sight of you
+      const a = this.g.pose(c.m), b = this.g.pose(this.p);
+      const d = Math.hypot(a.x - b.x, a.z - b.z);
+      return run * (d > 30 ? 1.1 : d > 18 ? 1.0 : 0.95) + (this.g.coverage > 0.7 ? 0.6 : 0);
+    }
+    const s = 15.5 + (this.round - 1) * 1.0;
+    return Math.min(run - 0.8, s);
   }
 
   updateCops(dt) {
-    const pp = this.g.pose(this.p), rp = this.runnerPos();
+    const pp = this.g.pose(this.p);
     for (const c of this.cops) {
       if (c.sayT > 0) { c.sayT -= dt; if (c.sayT <= 0) c.bubble.hide(); }
       if (c.mode === 'active') {
@@ -535,7 +540,7 @@ export class Game {
         continue;
       }
       advance(this.g, c.m, this.copSpeed(c) * dt, (m, node, inH) => this.copAtNode(c, m, node, inH));
-      this.copLanes(c, dt, rp);
+      this.copLanes(c, dt);
     }
   }
 
@@ -545,6 +550,8 @@ export class Game {
     const pick = this.copPick(c, this.spawnNode, opts);
     c.m = { edge: pick.edge, dir: pick.dir, s: 0 };
     c.mode = 'active';
+    c.lane = Math.floor(Math.random() * 3) - 1; // his lane for the whole chase
+    c.lx = c.lane * laneW(g.edges[pick.edge]);
   }
 
   farNode(o) {
@@ -555,7 +562,7 @@ export class Game {
   copTarget(c) {
     const g = this.g, P = this.p;
     const pNode = g.endNode(P);
-    if (this.modeName() === 'scatter') return c.corner;
+    if (this.modeName() === 'scatter' && c.kind !== 'chase') return c.corner; // the tail copper never lets up
     const pp = g.pose(P), cp = c.m ? g.pose(c.m) : g.nodes[this.spawnNode];
     const d = Math.hypot(pp.x - cp.x, pp.z - cp.z);
     switch (c.kind) {
@@ -1048,7 +1055,9 @@ export class Game {
       // one continuous move: from facing the mascot round to the chase view
       const k = 1 - Math.max(0, this.readyT) / INTRO;
       const e = ease(Math.min(1, k * 1.15));
-      const pos = aroundRunner(pp.h + Math.PI * e, 8.5 + ((this.camBack || 11) - 8.5) * e, 3.2 + ((this.camUp || 6.6) - 3.2) * e);
+      // pull in tight as it passes the side, so it never swings through a building
+      const r = (8.5 + ((this.camBack || 11) - 8.5) * e) * (1 - 0.6 * Math.sin(Math.PI * e));
+      const pos = aroundRunner(pp.h + Math.PI * e, r, 3.2 + ((this.camUp || 6.6) - 3.2) * e);
       cam.position.lerp(pos, 1 - Math.exp(-dt * 12));
       this.camLook = new THREE.Vector3(pp.x, 2.3, pp.z).lerp(look, e);
       cam.lookAt(this.camLook);

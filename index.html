@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <title>Escape the Coppers</title>
+    <meta name="description" content="The Altnets game. Enter your postcode, lay full fibre down your own streets and keep one step ahead of the coppers." />
+    <meta name="theme-color" content="#07100f" />
+    <link rel="icon" type="image/png" href="/altnets-game/favicon.png" />
+    <link rel="apple-touch-icon" href="/altnets-game/apple-touch-icon.png" />
+    <!-- og:image needs the full https URL once hosted -->
+    <meta property="og:title" content="Escape the Coppers | The Altnets" />
+    <meta property="og:description" content="Enter your postcode. Lay full fibre down your own streets. Don't get nicked." />
+    <meta property="og:image" content="/og.png" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Outfit:wght@400;500;600;800;900&display=swap" rel="stylesheet" />
+    <script type="module" crossorigin src="/altnets-game/assets/index--PnRexxK.js"></script>
+    <link rel="stylesheet" crossorigin href="/altnets-game/assets/index-DQyH2_gb.css">
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene" aria-label="Game view"></canvas>
+
+      <header class="hud" id="hud" hidden>
+        <div class="hud-where">
+          <div class="wordmark small"><span>The</span>Altnets</div>
+          <div class="hud-area" id="hudArea"></div>
+        </div>
+        <div class="hud-meter">
+          <div class="meter"><i id="bar"></i></div>
+          <div class="meter-label"><b id="pct">0%</b> on full fibre</div>
+        </div>
+        <div class="hud-right">
+          <div class="hud-coins" aria-label="Altnets coins"><i class="coin-ico" aria-hidden="true">A</i><b id="coins">0</b></div>
+          <div class="hud-score"><small>Score</small><b id="score">0</b></div>
+          <div class="lives" id="lives" aria-label="Lives"></div>
+          <button class="icon-btn" id="muteBtn" type="button" aria-label="Turn sound off"></button>
+          <button class="icon-btn" id="pauseBtn" type="button" aria-label="Pause"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1.2"/><rect x="14" y="5" width="4" height="14" rx="1.2"/></svg></button>
+        </div>
+      </header>
+
+      <canvas id="minimap" width="300" height="300" hidden aria-hidden="true"></canvas>
+
+      <div class="status" id="status" hidden>
+        <span class="chip turn" id="turnChip" hidden></span>
+        <span class="chip power" id="powerChip" hidden></span>
+        <span class="chip streak" id="multChip" hidden></span>
+        <span class="chip finder" id="finderChip" hidden><i aria-hidden="true">&uarr;</i><b></b></span>
+        <span class="street" id="street"></span>
+      </div>
+
+      <div class="banner" id="banner" hidden></div>
+      <div class="hint" id="hint" role="status" hidden></div>
+      <div class="pops" id="pops" aria-live="polite"></div>
+      <div class="danger" id="danger" aria-hidden="true"></div>
+      <div class="threats" id="threats" aria-hidden="true"></div>
+
+      <div class="pad" id="pad" hidden>
+        <button type="button" data-act="left" aria-label="Move left a lane"><span>&lsaquo;</span>Left</button>
+        <button type="button" data-act="jump" aria-label="Jump">Jump</button>
+        <button type="button" data-act="right" aria-label="Move right a lane">Right<span>&rsaquo;</span></button>
+      </div>
+
+      <section class="screen" id="screen"></section>
+      <div class="fade" id="fade" aria-hidden="true"></div>
+
+      <footer class="credit">Map data &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></footer>
+    </div>
+  </body>
+</html>

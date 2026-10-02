@@ -1,4 +1,6 @@
 import { defineConfig } from 'vite';
+import { cp } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { getArea } from './server/area.js';
 import { getFibre } from './server/fibre.js';
 
@@ -36,8 +38,28 @@ function areaApi() {
   };
 }
 
+// VITE_STATIC=1 builds for GitHub Pages: no API, the browser builds maps itself
+// and the Ofcom coverage files ship alongside the site.
+const STATIC = process.env.VITE_STATIC === '1';
+const shim = fileURLToPath(new URL('./src/shims/node.js', import.meta.url));
+function copyFibre() {
+  return {
+    name: 'copy-fibre',
+    apply: 'build',
+    async closeBundle() {
+      const src = fileURLToPath(new URL('./.data/fibre', import.meta.url));
+      await cp(src, fileURLToPath(new URL('./dist/fibre', import.meta.url)), { recursive: true });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [areaApi()],
+  base: STATIC ? process.env.BASE_PATH || '/altnets-game/' : '/',
+  plugins: [areaApi(), ...(STATIC ? [copyFibre()] : [])],
+  ...(STATIC && {
+    define: { 'process.env': '{}' },
+    resolve: { alias: Object.fromEntries(['node:fs/promises', 'node:path', 'node:zlib', 'node:util', 'node:url'].map((m) => [m, shim])) },
+  }),
   // .data holds ~257k map tiles; watching them would grind the dev server
   server: { port: 5190, host: true, watch: { ignored: ['**/.data/**', '**/.cache/**'] } },
   preview: { port: 5190, host: true },

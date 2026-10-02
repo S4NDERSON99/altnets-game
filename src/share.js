@@ -324,7 +324,7 @@ function wrapText(ctx, text, x, y, maxW, lh) {
 
 export async function makeShareCard({ area, graph, score, pct, caughtBy, cleared, round }) {
   await loadFonts();
-  const heroImg = await loadImage('/sprites/altnet-hero.jpg');
+  const heroImg = await loadImage(import.meta.env.BASE_URL + 'sprites/altnet-hero.jpg');
 
   const canvas = document.createElement('canvas');
   canvas.width = W;

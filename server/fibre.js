@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { normalisePostcode } from './area.js';
 
 const DIR = process.env.FIBRE_DIR || fileURLToPath(new URL('../.data/fibre', import.meta.url));
-const BASE = (process.env.FIBRE_URL || '').replace(/\/$/, '');
+const BASE = (process.env.FIBRE_URL || globalThis.__FIBRE_URL || '').replace(/\/$/, '');
 const cache = new Map();
 
 async function outcodeFile(outcode) {

@@ -10,6 +10,8 @@ import { tilesReady, elementsAround } from './tiles.js';
 // On Vercel the filesystem is read-only except /tmp, so the area cache moves there.
 const CACHE_DIR = process.env.VERCEL ? '/tmp/altnets-areas' : fileURLToPath(new URL('../.cache/areas', import.meta.url));
 const UA = 'altnets-game/0.1 (+https://thealtnets.com)';
+// browsers set their own User-Agent (and a custom one forces a CORS preflight)
+const UA_HEADERS = typeof window === 'undefined' ? { 'User-Agent': UA } : {};
 // Raced in parallel, first good JSON wins. Checked 23 Sep 2026: the bare
 // overpass-api.de name mostly answers 504 "too busy" (it fronts lz4 and z, so
 // asking those directly is better); kumi.systems and private.coffee time out.
@@ -50,7 +52,7 @@ async function getJson(url, init = {}, timeoutMs = 45000) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { ...init, signal: ctl.signal, headers: { 'User-Agent': UA, Accept: 'application/json', ...(init.headers || {}) } });
+    const res = await fetch(url, { ...init, signal: ctl.signal, headers: { ...UA_HEADERS, Accept: 'application/json', ...(init.headers || {}) } });
     const type = res.headers.get('content-type') || '';
     if (!type.includes('json')) return { ok: false, status: res.status, body: null };
     return { ok: res.ok, status: res.status, body: await res.json() };
@@ -84,7 +86,7 @@ async function overpassRace(query) {
     let last = new Error(`${ep} not asked`);
     for (let wait = 1000; !ctl.signal.aborted; wait *= 2) {
       try {
-        const res = await fetch(ep, { method: 'POST', body, signal: ctl.signal, headers: { 'User-Agent': UA, Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' } });
+        const res = await fetch(ep, { method: 'POST', body, signal: ctl.signal, headers: { ...UA_HEADERS, Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' } });
         if (!res.ok || !(res.headers.get('content-type') || '').includes('json')) throw new Error(`${ep} ${res.status}`);
         const json = await res.json();
         if (!Array.isArray(json.elements) || /runtime error/i.test(json.remark || '')) throw new Error(`${ep} ${json.remark || 'no elements'}`);

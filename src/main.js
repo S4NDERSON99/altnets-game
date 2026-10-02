@@ -27,6 +27,8 @@ import { Game } from './game.js';
 import * as audio from './audio.js';
 
 const STEP = 1 / 60;
+// static hosting (GitHub Pages) has no API: maps and coverage come from the browser
+const STATIC = import.meta.env.VITE_STATIC === '1';
 const $ = (id) => document.getElementById(id);
 const coarse = matchMedia('(pointer: coarse)').matches;
 const TAGLINES = ['Not the same old network.', 'Different fibre. Brighter places.', 'Alternative routes. A brighter tomorrow.'];
@@ -136,7 +138,7 @@ function updateHud() {
   if (h.pct !== hud.pct) { hud.pct = h.pct; $('pct').textContent = h.pct + '%'; $('bar').style.width = h.pct + '%'; }
   if (h.lives !== hud.lives) {
     hud.lives = h.lives;
-    $('lives').innerHTML = Array.from({ length: Math.max(0, h.lives) }, () => '<img src="/sprites/altnet-back.png" alt="">').join('');
+    $('lives').innerHTML = Array.from({ length: Math.max(0, h.lives) }, () => `<img src="${import.meta.env.BASE_URL}sprites/altnet-back.png" alt="">`).join('');
     $('lives').setAttribute('aria-label', `${h.lives} lives left`);
   }
   const street = h.street || 'a back lane';
@@ -363,11 +365,13 @@ let prefetchT = 0;
 function fetchArea(pc) {
   const key = pc.toUpperCase().replace(/\s+/g, '');
   if (!areaCache.has(key)) {
-    const p = fetch('/api/area?postcode=' + encodeURIComponent(pc)).then(async (res) => {
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || 'Something went wrong loading that area.');
-      return body;
-    });
+    const p = STATIC
+      ? import('./area-client.js').then((m) => m.areaFor(pc))
+      : fetch('/api/area?postcode=' + encodeURIComponent(pc)).then(async (res) => {
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || 'Something went wrong loading that area.');
+        return body;
+      });
     p.catch(() => areaCache.delete(key));
     areaCache.set(key, p);
   }
@@ -413,7 +417,7 @@ async function startDemo() {
   playMode = 'demo';
   track('start', { mode: 'demo' });
   audio.start();
-  baileyArea = baileyArea || await (await fetch('/areas/old-bailey.json')).json();
+  baileyArea = baileyArea || await (await fetch(import.meta.env.BASE_URL + 'areas/old-bailey.json')).json();
   await switchArea(baileyArea);
   play();
 }
@@ -494,8 +498,11 @@ async function fillReality(pc) {
   box.innerHTML = `<p class="reality-q">Checking ${esc(pc)}&hellip;</p>`;
   let data = null;
   try {
-    const res = await fetch('/api/fibre?postcode=' + encodeURIComponent(pc));
-    if (res.ok) data = await res.json();
+    if (STATIC) data = await (await import('./area-client.js')).fibreFor(pc);
+    else {
+      const res = await fetch('/api/fibre?postcode=' + encodeURIComponent(pc));
+      if (res.ok) data = await res.json();
+    }
   } catch { /* offline: fall back */ }
   if (!$('reality')) return;
   if (data && data.gigabit != null) {
@@ -730,7 +737,7 @@ function frame(now) {
 
 // boot: the Old Bailey turns slowly behind the title card
 (async () => {
-  baileyArea = await (await fetch('/areas/old-bailey.json')).json();
+  baileyArea = await (await fetch(import.meta.env.BASE_URL + 'areas/old-bailey.json')).json();
   mountGame(baileyArea);
   titleScreen();
   requestAnimationFrame(frame);

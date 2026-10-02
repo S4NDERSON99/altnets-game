@@ -8,7 +8,7 @@ import { COLOURS } from './world.js';
 const loader = new THREE.TextureLoader();
 
 export function makeRunner() {
-  const tex = loader.load('/sprites/altnet-back.png');
+  const tex = loader.load(import.meta.env.BASE_URL + 'sprites/altnet-back.png');
   tex.colorSpace = THREE.SRGBColorSpace;
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, fog: false });
   const sprite = new THREE.Sprite(mat);
@@ -73,7 +73,7 @@ function addHoodieBack(mesh) {
   const ray = new THREE.Raycaster(new THREE.Vector3(b.min.x - H, y, cz), new THREE.Vector3(1, 0, 0));
   const hit = ray.intersectObject(new THREE.Mesh(mesh.geometry), false)[0];
   const x = hit ? hit.point.x : b.min.x;
-  const tex = loader.load('/models/hoodie-back.png');
+  const tex = loader.load(import.meta.env.BASE_URL + 'models/hoodie-back.png');
   tex.colorSpace = THREE.SRGBColorSpace;
   const w = W * 0.62;
   const decal = new THREE.Mesh(new THREE.PlaneGeometry(w, w * (328 / 472)), new THREE.MeshStandardMaterial({ map: tex, transparent: true, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -4 }));
@@ -88,7 +88,7 @@ function mascotGltf() {
   if (!mascotLoad) {
     const loader = new GLTFLoader();
     loader.setMeshoptDecoder(MeshoptDecoder);
-    mascotLoad = loader.loadAsync('/models/altnet.glb');
+    mascotLoad = loader.loadAsync(import.meta.env.BASE_URL + 'models/altnet.glb');
   }
   return mascotLoad;
 }
@@ -150,7 +150,7 @@ function withCopperModel(cb) {
   if (copperWaiting.length > 1) return;
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
-  loader.load('/models/copper.glb', (gltf) => {
+  loader.load(import.meta.env.BASE_URL + 'models/copper.glb', (gltf) => {
     copperModel = gltf.scene;
     copperWaiting.splice(0).forEach((f) => f(copperModel));
   }, undefined, () => { copperWaiting.length = 0; });

@@ -34,7 +34,7 @@ const voiceBuf = {};
 let voiceBusyUntil = 0;
 function loadVoices() {
   for (const k of VOICES) {
-    fetch(`/audio/${k}.mp3`).then((r) => r.arrayBuffer()).then((b) => ctx.decodeAudioData(b)).then((buf) => { voiceBuf[k] = buf; }).catch(() => {});
+    fetch(`${import.meta.env.BASE_URL}audio/${k}.mp3`).then((r) => r.arrayBuffer()).then((b) => ctx.decodeAudioData(b)).then((buf) => { voiceBuf[k] = buf; }).catch(() => {});
   }
 }
 

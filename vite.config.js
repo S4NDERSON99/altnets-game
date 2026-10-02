@@ -56,10 +56,10 @@ function copyFibre() {
 export default defineConfig({
   base: STATIC ? process.env.BASE_PATH || '/altnets-game/' : '/',
   plugins: [areaApi(), ...(STATIC ? [copyFibre()] : [])],
-  ...(STATIC && {
-    define: { 'process.env': '{}' },
-    resolve: { alias: Object.fromEntries(['node:fs/promises', 'node:path', 'node:zlib', 'node:util', 'node:url'].map((m) => [m, shim])) },
-  }),
+  // the browser bundle can reach the map builder (static mode), so Node
+  // built-ins are swapped for stubs there; the dev server's API still runs real Node
+  define: { 'process.env': '{}' },
+  resolve: { alias: Object.fromEntries(['node:fs/promises', 'node:path', 'node:zlib', 'node:util', 'node:url'].map((m) => [m, shim])) },
   // .data holds ~257k map tiles; watching them would grind the dev server
   server: { port: 5190, host: true, watch: { ignored: ['**/.data/**', '**/.cache/**'] } },
   preview: { port: 5190, host: true },
